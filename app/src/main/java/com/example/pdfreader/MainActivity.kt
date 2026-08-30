@@ -1,5 +1,7 @@
 package com.example.pdfreader
 
+import android.content.ActivityNotFoundException
+import android.content.ClipData
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -49,6 +51,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var titleView: TextView
     private lateinit var emptyHint: View
     private lateinit var btnBack: View
+    private lateinit var btnShare: View
     private lateinit var rvRecent: RecyclerView
     private lateinit var tvNoRecent: TextView
 
@@ -91,12 +94,14 @@ class MainActivity : AppCompatActivity() {
         titleView = findViewById(R.id.titleView)
         emptyHint = findViewById(R.id.emptyHint)
         btnBack = findViewById(R.id.btnBack)
+        btnShare = findViewById(R.id.btnShare)
         rvRecent = findViewById(R.id.rvRecent)
         tvNoRecent = findViewById(R.id.tvNoRecent)
 
         findViewById<View>(R.id.btnOpen).setOnClickListener { pickFile() }
         findViewById<View>(R.id.btnSettings).setOnClickListener { showSettingsDialog() }
         btnBack.setOnClickListener { closeDocument() }
+        btnShare.setOnClickListener { shareCurrentFile() }
 
         rvRecent.layoutManager = LinearLayoutManager(this)
         rvRecent.adapter = recentAdapter
@@ -176,6 +181,7 @@ class MainActivity : AppCompatActivity() {
         emptyHint.visibility = View.GONE
         pdfView.visibility = View.VISIBLE
         btnBack.visibility = View.VISIBLE
+        btnShare.visibility = View.VISIBLE
         backCallback.isEnabled = true
 
         val name = displayName(uri)
@@ -236,6 +242,30 @@ class MainActivity : AppCompatActivity() {
             // Имя не отдали - обойдёмся хвостом ссылки.
         }
         return uri.lastPathSegment ?: getString(R.string.default_document_name)
+    }
+
+    /**
+     * Отдаёт открытый файл системному меню "Поделиться".
+     *
+     * ClipData вместе с FLAG_GRANT_READ_URI_PERMISSION передаёт получателю
+     * право прочитать файл: без этого приложение-получатель видит ссылку,
+     * но открыть по ней ничего не может.
+     */
+    private fun shareCurrentFile() {
+        val uri = currentUri ?: return
+        val name = displayName(uri)
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = PDF_MIME_TYPE
+            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_TITLE, name)
+            clipData = ClipData.newUri(contentResolver, name, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        try {
+            startActivity(Intent.createChooser(send, getString(R.string.cd_share)))
+        } catch (_: ActivityNotFoundException) {
+            Toast.makeText(this, R.string.error_share_failed, Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun toggleUi() {
@@ -312,6 +342,7 @@ class MainActivity : AppCompatActivity() {
         emptyHint.visibility = View.VISIBLE
         pdfView.visibility = View.GONE
         btnBack.visibility = View.GONE
+        btnShare.visibility = View.GONE
         titleView.setText(R.string.app_name)
         uiHidden = false // к списку всегда возвращаемся с видимыми барами
         applyUiState()

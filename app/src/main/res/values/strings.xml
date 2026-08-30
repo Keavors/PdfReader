@@ -4,6 +4,7 @@
     <!-- Верхняя панель -->
     <string name="icon_back">←</string>
     <string name="cd_back">Закрыть документ</string>
+    <string name="cd_share">Поделиться</string>
     <string name="cd_open">Открыть файл</string>
     <string name="cd_settings">Настройки просмотра</string>
 
@@ -24,4 +25,5 @@
 
     <string name="default_document_name">Документ.pdf</string>
     <string name="error_open_failed">Не удалось открыть файл</string>
+    <string name="error_share_failed">Нечем поделиться файлом</string>
 </resources>
