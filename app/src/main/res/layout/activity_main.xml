@@ -3,7 +3,6 @@
     android:id="@+id/root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#111111"
     android:orientation="vertical">
 
     <!-- Верхняя панель: [←] [имя файла] [📂] [⚙️] -->
@@ -11,7 +10,7 @@
         android:id="@+id/topBar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="#1E1E1E"
+        android:background="@color/top_bar"
         android:elevation="6dp"
         android:gravity="center_vertical"
         android:orientation="horizontal"
@@ -24,9 +23,10 @@
             android:layout_width="48dp"
             android:layout_height="48dp"
             android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/cd_back"
             android:gravity="center"
-            android:text="←"
-            android:textColor="#FFFFFF"
+            android:text="@string/icon_back"
+            android:textColor="@color/text_primary"
             android:textSize="22sp"
             android:visibility="gone" />
 
@@ -40,8 +40,8 @@
             android:paddingStart="8dp"
             android:paddingEnd="8dp"
             android:paddingTop="4dp"
-            android:text="PDF Reader"
-            android:textColor="#FFFFFF"
+            android:text="@string/app_name"
+            android:textColor="@color/text_primary"
             android:textSize="15sp" />
 
         <TextView
@@ -49,6 +49,7 @@
             android:layout_width="48dp"
             android:layout_height="48dp"
             android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/cd_open"
             android:gravity="center"
             android:text="📂"
             android:textSize="20sp" />
@@ -58,6 +59,7 @@
             android:layout_width="48dp"
             android:layout_height="48dp"
             android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/cd_settings"
             android:gravity="center"
             android:text="⚙️"
             android:textSize="20sp" />
@@ -74,7 +76,7 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent" />
 
-        <!-- Экран "файл не открыт": заголовок + список недавних -->
+        <!-- Экран "файл не открыт": заголовок и список недавних -->
         <LinearLayout
             android:id="@+id/emptyHint"
             android:layout_width="match_parent"
@@ -87,11 +89,11 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:paddingStart="16dp"
-                android:paddingEnd="16dp"
                 android:paddingTop="16dp"
+                android:paddingEnd="16dp"
                 android:paddingBottom="8dp"
-                android:text="Недавние файлы"
-                android:textColor="#AAAAAA"
+                android:text="@string/recent_title"
+                android:textColor="@color/text_secondary"
                 android:textSize="14sp"
                 android:textStyle="bold" />
 
@@ -101,8 +103,8 @@
                 android:layout_height="wrap_content"
                 android:gravity="center"
                 android:paddingTop="48dp"
-                android:text="Пока пусто — открой PDF через 📂 сверху"
-                android:textColor="#777777"
+                android:text="@string/recent_empty"
+                android:textColor="@color/text_hint"
                 android:textSize="15sp"
                 android:visibility="gone" />
 

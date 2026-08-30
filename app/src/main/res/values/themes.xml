@@ -3,6 +3,7 @@
 
     <!-- Имя стиля должно совпадать с android:theme в манифесте -->
     <style name="Theme.PdfReader" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="android:windowBackground">@color/reader_background</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <!-- В альбомной ориентации рисуем и под вырезом камеры, без чёрных полос -->

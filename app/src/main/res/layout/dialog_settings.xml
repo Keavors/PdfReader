@@ -4,13 +4,13 @@
     android:layout_height="wrap_content"
     android:orientation="vertical"
     android:paddingStart="24dp"
-    android:paddingEnd="24dp"
-    android:paddingTop="8dp">
+    android:paddingTop="8dp"
+    android:paddingEnd="24dp">
 
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Направление листания"
+        android:text="@string/settings_direction"
         android:textStyle="bold" />
 
     <RadioGroup
@@ -22,20 +22,20 @@
             android:id="@+id/rbVertical"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Вертикально" />
+            android:text="@string/settings_direction_vertical" />
 
         <RadioButton
             android:id="@+id/rbHorizontal"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Горизонтально" />
+            android:text="@string/settings_direction_horizontal" />
     </RadioGroup>
 
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginTop="16dp"
-        android:text="Страницы"
+        android:text="@string/settings_pages"
         android:textStyle="bold" />
 
     <RadioGroup
@@ -47,13 +47,13 @@
             android:id="@+id/rbContinuous"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Слитно, все подряд" />
+            android:text="@string/settings_pages_continuous" />
 
         <RadioButton
             android:id="@+id/rbSingle"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="По одной странице" />
+            android:text="@string/settings_pages_single" />
     </RadioGroup>
 
 </LinearLayout>

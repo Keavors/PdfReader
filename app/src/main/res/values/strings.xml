@@ -1,3 +1,27 @@
 <resources>
-    <string name="app_name">PdfReader</string>
+    <string name="app_name">PDF Reader</string>
+
+    <!-- Верхняя панель -->
+    <string name="icon_back">←</string>
+    <string name="cd_back">Закрыть документ</string>
+    <string name="cd_open">Открыть файл</string>
+    <string name="cd_settings">Настройки просмотра</string>
+
+    <!-- Список недавних файлов -->
+    <string name="recent_title">Недавние файлы</string>
+    <string name="recent_empty">Пока пусто — открой PDF кнопкой 📂 сверху</string>
+
+    <!-- Диалог режима просмотра -->
+    <string name="settings_title">Режим просмотра</string>
+    <string name="settings_direction">Направление листания</string>
+    <string name="settings_direction_vertical">Вертикально</string>
+    <string name="settings_direction_horizontal">Горизонтально</string>
+    <string name="settings_pages">Страницы</string>
+    <string name="settings_pages_continuous">Слитно, все подряд</string>
+    <string name="settings_pages_single">По одной странице</string>
+    <string name="action_apply">Применить</string>
+    <string name="action_cancel">Отмена</string>
+
+    <string name="default_document_name">Документ.pdf</string>
+    <string name="error_open_failed">Не удалось открыть файл</string>
 </resources>

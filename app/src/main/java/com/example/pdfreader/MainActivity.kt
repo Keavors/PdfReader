@@ -1,18 +1,18 @@
-package com.example.pdfreader // ← ЗАМЕНИ на свой package (первая строка твоего сгенерированного MainActivity)
-import android.content.Context
+package com.example.pdfreader
+
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.provider.OpenableColumns
-import android.view.LayoutInflater
 import android.view.View
-import android.view.ViewGroup
 import android.widget.RadioGroup
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.graphics.Insets
+import androidx.core.net.toUri
 import androidx.core.os.BundleCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
@@ -21,20 +21,27 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.github.barteksc.pdfviewer.PDFView
-import com.github.barteksc.pdfviewer.scroll.DefaultScrollHandle
 import com.github.barteksc.pdfviewer.util.FitPolicy
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
-import org.json.JSONArray
-import org.json.JSONObject
 
+/** Единственный тип файлов, который открывает приложение. */
+private const val PDF_MIME_TYPE = "application/pdf"
+
+/** Зазор между страницами в слитной ленте, px. */
+private const val PAGE_SPACING = 6
+
+private const val STATE_URI = "uri"
+private const val STATE_PAGE = "page"
+private const val STATE_HIDDEN = "hidden"
+
+/**
+ * Единственный экран приложения: список недавних файлов, пока документ не выбран,
+ * и просмотрщик, когда выбран.
+ *
+ * Одиночный тап по документу убирает с экрана всё, кроме самого файла
+ * (панель, ползунок, системные бары), повторный — возвращает.
+ */
 class MainActivity : AppCompatActivity() {
-
-    companion object {
-        private const val PREFS = "reader_prefs"
-        private const val KEY_HORIZONTAL = "swipe_horizontal" // false = вертикально
-        private const val KEY_SINGLE = "single_page"          // false = слитно, все подряд
-        private const val KEY_RECENT = "recent_files"         // JSON список
-    }
 
     private lateinit var rootView: View
     private lateinit var pdfView: PDFView
@@ -45,36 +52,38 @@ class MainActivity : AppCompatActivity() {
     private lateinit var rvRecent: RecyclerView
     private lateinit var tvNoRecent: TextView
 
+    private lateinit var recentFiles: RecentFilesStore
+    private val recentAdapter = RecentFilesAdapter { openPdf(it.uri.toUri(), fromStart = true) }
+
     private var scrollHandle: LockableScrollHandle? = null
-    private var recentAdapter: RecentFilesAdapter? = null
 
     private var currentUri: Uri? = null
     private var currentPage = 0
     private var uiHidden = false
 
-    /** Размеры системных баров + выреза камеры. IgnoringVisibility — чтобы знать их даже когда бары спрятаны. */
+    /** Размеры системных баров и выреза камеры — известны, даже когда бары спрятаны. */
     private var barInsets: Insets = Insets.NONE
 
-    // Системный пикер файлов (SAF) — разрешения в манифесте не нужны вообще
+    // Системный пикер файлов (SAF) — разрешения в манифесте не нужны вообще.
     private val openPdfLauncher =
         registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             if (uri != null) {
-                try {
-                    contentResolver.takePersistableUriPermission(
-                        uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
-                    )
-                } catch (_: SecurityException) {
-                    // постоянное разрешение не дали — для текущей сессии и так хватит
-                }
-                currentPage = 0
-                openPdf(uri)
+                keepAccess(uri)
+                openPdf(uri, fromStart = true)
             }
         }
+
+    /** Системная кнопка "назад" сначала закрывает документ и только потом выходит. */
+    private val backCallback = object : OnBackPressedCallback(false) {
+        override fun handleOnBackPressed() = closeDocument()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false) // рисуем от края до края
         setContentView(R.layout.activity_main)
+
+        recentFiles = RecentFilesStore(this)
 
         rootView = findViewById(R.id.root)
         pdfView = findViewById(R.id.pdfView)
@@ -90,15 +99,13 @@ class MainActivity : AppCompatActivity() {
         btnBack.setOnClickListener { closeDocument() }
 
         rvRecent.layoutManager = LinearLayoutManager(this)
-        recentAdapter = RecentFilesAdapter(emptyList()) { recent ->
-            currentPage = 0 // иначе новый файл откроется на странице предыдущего
-            openPdf(recent.uri)
-        }
         rvRecent.adapter = recentAdapter
 
+        onBackPressedDispatcher.addCallback(this, backCallback)
+
         // ЕДИНСТВЕННЫЙ слушатель инсетов — на корневом layout.
-        // systemBars + displayCutout: вырез камеры — это ОТДЕЛЬНЫЙ тип, в systemBars его нет.
-        // В альбомной ориентации навигационная панель уезжает на боковую грань (left/right).
+        // systemBars + displayCutout: вырез камеры это ОТДЕЛЬНЫЙ тип, в systemBars его нет.
+        // В альбомной ориентации навигационная панель уезжает на боковую грань.
         ViewCompat.setOnApplyWindowInsetsListener(rootView) { _, insets ->
             barInsets = insets.getInsetsIgnoringVisibility(
                 WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
@@ -107,59 +114,88 @@ class MainActivity : AppCompatActivity() {
             insets
         }
 
-        if (savedInstanceState != null) {
-            // Восстановление после поворота экрана
-            currentUri = BundleCompat.getParcelable(savedInstanceState, "uri", Uri::class.java)
-            currentPage = savedInstanceState.getInt("page", 0)
-            uiHidden = savedInstanceState.getBoolean("hidden", false)
-        } else if (intent?.action == Intent.ACTION_VIEW) {
-            // Открыли PDF из проводника через "Открыть с помощью"
-            currentUri = intent.data
+        val restoredUri = savedInstanceState?.let {
+            currentPage = it.getInt(STATE_PAGE, 0)
+            uiHidden = it.getBoolean(STATE_HIDDEN, false)
+            BundleCompat.getParcelable(it, STATE_URI, Uri::class.java)
         }
 
-        currentUri?.let { openPdf(it) } ?: loadRecentFiles()
+        val uri = restoredUri ?: intentUri(intent)?.also { keepAccess(it) }
+        if (uri != null) openPdf(uri, fromStart = false) else showRecentFiles()
         applyUiState()
+    }
+
+    /** Открыли ещё один PDF, пока приложение уже запущено. */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        val uri = intentUri(intent) ?: return
+        keepAccess(uri)
+        openPdf(uri, fromStart = true)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
-        outState.putParcelable("uri", currentUri)
-        outState.putInt("page", currentPage)
-        outState.putBoolean("hidden", uiHidden)
+        outState.putParcelable(STATE_URI, currentUri)
+        outState.putInt(STATE_PAGE, currentPage)
+        outState.putBoolean(STATE_HIDDEN, uiHidden)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        pdfView.recycle() // иначе документ висит в нативной памяти до сборки мусора
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) applyUiState() // после сворачивания/диалогов снова прячем бары, если надо
+        // После диалога или сворачивания системные бары возвращаются сами - прячем снова.
+        if (hasFocus && uiHidden) applyUiState()
     }
 
-    private fun pickFile() = openPdfLauncher.launch(arrayOf("application/pdf"))
+    private fun intentUri(intent: Intent?): Uri? =
+        if (intent?.action == Intent.ACTION_VIEW) intent.data else null
 
-    private fun openPdf(uri: Uri) {
+    /**
+     * Просит постоянный доступ к файлу, чтобы его можно было открыть из списка
+     * недавних и после перезапуска. Проводник такое разрешение даёт не всегда.
+     */
+    private fun keepAccess(uri: Uri) {
+        try {
+            contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        } catch (_: SecurityException) {
+            // Постоянного доступа не дали - на текущий сеанс прав и так хватит.
+        }
+    }
+
+    private fun pickFile() = openPdfLauncher.launch(arrayOf(PDF_MIME_TYPE))
+
+    /** @param fromStart открыть с первой страницы, а не с той, где остановились. */
+    private fun openPdf(uri: Uri, fromStart: Boolean) {
+        if (fromStart) currentPage = 0
         currentUri = uri
         emptyHint.visibility = View.GONE
         pdfView.visibility = View.VISIBLE
         btnBack.visibility = View.VISIBLE
-        titleView.text = displayName(uri) // полное имя файла в панели слева
-        saveRecentFile(uri)
+        backCallback.isEnabled = true
 
-        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
-        val horizontal = prefs.getBoolean(KEY_HORIZONTAL, false)
-        val singlePage = prefs.getBoolean(KEY_SINGLE, false)
+        val name = displayName(uri)
+        titleView.text = name
+        recentFiles.add(uri, name)
 
+        val settings = ReaderSettings.load(this)
         val fitPolicy = when {
-            singlePage -> FitPolicy.BOTH    // страница целиком помещается на экран
-            horizontal -> FitPolicy.HEIGHT  // лента по горизонтали — вписываем по высоте
-            else -> FitPolicy.WIDTH         // лента по вертикали — вписываем по ширине
+            settings.singlePage -> FitPolicy.BOTH   // страница целиком помещается на экран
+            settings.horizontal -> FitPolicy.HEIGHT // лента по горизонтали - вписываем по высоте
+            else -> FitPolicy.WIDTH                 // лента по вертикали - вписываем по ширине
         }
 
         pdfView.fromUri(uri)
             .defaultPage(currentPage)
-            .swipeHorizontal(horizontal)
-            .pageSnap(singlePage)                     // прилипание к странице
-            .autoSpacing(singlePage)                  // в постраничном — по одной на экран
-            .pageFling(singlePage)                    // свайп = ровно одна страница
-            .spacing(if (singlePage) 0 else 6)        // зазор между страницами в ленте
+            .swipeHorizontal(settings.horizontal)
+            .pageSnap(settings.singlePage)                  // прилипание к странице
+            .autoSpacing(settings.singlePage)               // в постраничном - по одной на экран
+            .pageFling(settings.singlePage)                 // свайп = ровно одна страница
+            .spacing(if (settings.singlePage) 0 else PAGE_SPACING)
             .pageFitPolicy(fitPolicy)
             .fitEachPage(true)
             .scrollHandle(LockableScrollHandle(this).also {
@@ -169,35 +205,37 @@ class MainActivity : AppCompatActivity() {
             .enableAntialiasing(true)
             .enableAnnotationRendering(true)
             .onPageChange { page, _ -> currentPage = page }
-            .onTap { toggleUi(); true }               // одиночный тап = скрыть/показать всё
+            .onTap { toggleUi(); true }                     // одиночный тап = скрыть/показать всё
             .onError {
-                Toast.makeText(this, "Не удалось открыть файл", Toast.LENGTH_LONG).show()
-                currentUri?.let { broken -> removeRecentFile(broken) } // битую запись — вон из списка
-                currentUri = null
-                scrollHandle = null
-                loadRecentFiles()
+                Toast.makeText(this, R.string.error_open_failed, Toast.LENGTH_LONG).show()
+                currentUri?.let { broken -> recentFiles.remove(broken) }
+                closeDocument()
             }
             .load()
     }
 
     private fun closeDocument() {
         currentUri = null
+        currentPage = 0
         scrollHandle = null
+        backCallback.isEnabled = false
         pdfView.recycle()
-        loadRecentFiles()
+        showRecentFiles()
     }
 
+    /** Имя файла для заголовка и списка недавних. */
     private fun displayName(uri: Uri): String {
         try {
-            contentResolver.query(uri, null, null, null, null)?.use { c ->
-                val idx = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                if (idx >= 0 && c.moveToFirst()) {
-                    c.getString(idx)?.let { return it }
+            contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (index >= 0 && cursor.moveToFirst()) {
+                    cursor.getString(index)?.let { return it }
                 }
             }
         } catch (_: Exception) {
+            // Имя не отдали - обойдёмся хвостом ссылки.
         }
-        return uri.lastPathSegment ?: "Документ.pdf"
+        return uri.lastPathSegment ?: getString(R.string.default_document_name)
     }
 
     private fun toggleUi() {
@@ -209,9 +247,9 @@ class MainActivity : AppCompatActivity() {
     private fun applyUiState() {
         val controller = WindowInsetsControllerCompat(window, window.decorView)
         if (uiHidden) {
-            // Прячем ВСЁ: панель приложения, ползунок, статус-бар, кнопки навигации
+            // Прячем ВСЁ: панель приложения, ползунок, статус-бар, кнопки навигации.
             topBar.visibility = View.GONE
-            scrollHandle?.locked = true   // и запрещаем ему вылезать при прокрутке
+            scrollHandle?.locked = true
             controller.systemBarsBehavior =
                 WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             controller.hide(WindowInsetsCompat.Type.systemBars())
@@ -219,16 +257,16 @@ class MainActivity : AppCompatActivity() {
             topBar.visibility = View.VISIBLE
             scrollHandle?.locked = false
             scrollHandle?.show()
-            scrollHandle?.hideDelayed()   // появился вместе с UI и сам растает через секунду
+            scrollHandle?.hideDelayed() // появился вместе с UI и сам растает через секунду
             controller.show(WindowInsetsCompat.Type.systemBars())
         }
         applyPaddings()
     }
 
     /**
-     * Чистый режим: паддинги 0, документ занимает физически весь экран.
-     * UI виден: контент отодвинут от навигации/выреза по бокам и снизу,
-     * а верхняя панель сама берёт отступ статус-бара (её фон уходит под него).
+     * Режим чтения: паддинги 0, документ занимает физически весь экран.
+     * UI виден: контент отодвинут от навигации и выреза, а верхняя панель
+     * сама берёт отступ статус-бара - её фон уходит под него.
      */
     private fun applyPaddings() {
         if (uiHidden) {
@@ -236,153 +274,50 @@ class MainActivity : AppCompatActivity() {
             topBar.setPadding(topBar.paddingLeft, 0, topBar.paddingRight, topBar.paddingBottom)
         } else {
             rootView.setPadding(barInsets.left, 0, barInsets.right, barInsets.bottom)
-            topBar.setPadding(topBar.paddingLeft, barInsets.top, topBar.paddingRight, topBar.paddingBottom)
+            topBar.setPadding(
+                topBar.paddingLeft,
+                barInsets.top,
+                topBar.paddingRight,
+                topBar.paddingBottom,
+            )
         }
     }
 
     private fun showSettingsDialog() {
         val view = layoutInflater.inflate(R.layout.dialog_settings, null)
-        val rgDirection = view.findViewById<RadioGroup>(R.id.rgDirection)
-        val rgMode = view.findViewById<RadioGroup>(R.id.rgMode)
+        val directions = view.findViewById<RadioGroup>(R.id.rgDirection)
+        val modes = view.findViewById<RadioGroup>(R.id.rgMode)
 
-        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
-        rgDirection.check(
-            if (prefs.getBoolean(KEY_HORIZONTAL, false)) R.id.rbHorizontal else R.id.rbVertical
-        )
-        rgMode.check(
-            if (prefs.getBoolean(KEY_SINGLE, false)) R.id.rbSingle else R.id.rbContinuous
-        )
+        val settings = ReaderSettings.load(this)
+        directions.check(if (settings.horizontal) R.id.rbHorizontal else R.id.rbVertical)
+        modes.check(if (settings.singlePage) R.id.rbSingle else R.id.rbContinuous)
 
         MaterialAlertDialogBuilder(this)
-            .setTitle("Режим просмотра")
+            .setTitle(R.string.settings_title)
             .setView(view)
-            .setPositiveButton("Применить") { _, _ ->
-                prefs.edit()
-                    .putBoolean(KEY_HORIZONTAL, rgDirection.checkedRadioButtonId == R.id.rbHorizontal)
-                    .putBoolean(KEY_SINGLE, rgMode.checkedRadioButtonId == R.id.rbSingle)
-                    .apply()
-                // Перезагружаем с новыми настройками, текущая страница сохранится
-                currentUri?.let { openPdf(it) }
+            .setPositiveButton(R.string.action_apply) { _, _ ->
+                ReaderSettings(
+                    horizontal = directions.checkedRadioButtonId == R.id.rbHorizontal,
+                    singlePage = modes.checkedRadioButtonId == R.id.rbSingle,
+                ).save(this)
+                // Перечитываем с новыми настройками, текущая страница сохраняется.
+                currentUri?.let { openPdf(it, fromStart = false) }
             }
-            .setNegativeButton("Отмена", null)
+            .setNegativeButton(R.string.action_cancel, null)
             .show()
     }
 
-    // ---------- Недавние файлы ----------
-
-    private data class RecentFile(val uri: Uri, val name: String)
-
-    private fun saveRecentFile(uri: Uri) {
-        val name = displayName(uri)
-        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
-        val recentJson = prefs.getString(KEY_RECENT, "[]")
-        try {
-            val array = JSONArray(recentJson)
-            val newList = mutableListOf<JSONObject>()
-            newList.add(JSONObject().put("uri", uri.toString()).put("name", name))
-
-            for (i in 0 until array.length()) {
-                val obj = array.getJSONObject(i)
-                if (obj.getString("uri") != uri.toString()) {
-                    newList.add(obj)
-                }
-                if (newList.size >= 15) break
-            }
-
-            val newArray = JSONArray()
-            newList.forEach { newArray.put(it) }
-            prefs.edit().putString(KEY_RECENT, newArray.toString()).apply()
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-    }
-
-    private fun removeRecentFile(uri: Uri) {
-        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
-        try {
-            val array = JSONArray(prefs.getString(KEY_RECENT, "[]"))
-            val out = JSONArray()
-            for (i in 0 until array.length()) {
-                val obj = array.getJSONObject(i)
-                if (obj.getString("uri") != uri.toString()) out.put(obj)
-            }
-            prefs.edit().putString(KEY_RECENT, out.toString()).apply()
-        } catch (_: Exception) {
-        }
-    }
-
-    private fun loadRecentFiles() {
-        if (currentUri != null) return
+    /** Экран без открытого документа: заголовок и список недавних файлов. */
+    private fun showRecentFiles() {
         emptyHint.visibility = View.VISIBLE
         pdfView.visibility = View.GONE
         btnBack.visibility = View.GONE
-        titleView.text = "PDF Reader"
-        uiHidden = false // показываем бары при возврате к списку
+        titleView.setText(R.string.app_name)
+        uiHidden = false // к списку всегда возвращаемся с видимыми барами
         applyUiState()
 
-        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
-        val recentJson = prefs.getString(KEY_RECENT, "[]")
-        val list = mutableListOf<RecentFile>()
-        try {
-            val array = JSONArray(recentJson)
-            for (i in 0 until array.length()) {
-                val obj = array.getJSONObject(i)
-                list.add(RecentFile(Uri.parse(obj.getString("uri")), obj.getString("name")))
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-
-        recentAdapter?.update(list)
-        tvNoRecent.visibility = if (list.isEmpty()) View.VISIBLE else View.GONE
-    }
-
-    private inner class RecentFilesAdapter(
-        private var items: List<RecentFile>,
-        private val onClick: (RecentFile) -> Unit
-    ) : RecyclerView.Adapter<RecentFilesAdapter.VH>() {
-
-        inner class VH(view: View) : RecyclerView.ViewHolder(view) {
-            val tvName: TextView = view.findViewById(R.id.tvFileName)
-            val tvPath: TextView = view.findViewById(R.id.tvFilePath)
-        }
-
-        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
-            val view = LayoutInflater.from(parent.context)
-                .inflate(R.layout.item_recent_file, parent, false)
-            return VH(view)
-        }
-
-        override fun onBindViewHolder(holder: VH, position: Int) {
-            val item = items[position]
-            holder.tvName.text = item.name
-            holder.tvPath.text = item.uri.toString()
-            holder.itemView.setOnClickListener { onClick(item) }
-        }
-
-        override fun getItemCount() = items.size
-
-        fun update(newItems: List<RecentFile>) {
-            items = newItems
-            notifyDataSetChanged()
-        }
-    }
-}
-
-/**
- * DefaultScrollHandle внутри setScroll() САМ вызывает show() при каждой прокрутке —
- * поэтому обычный hide() не работает: ползунок тут же вылезает обратно.
- * Флаг locked блокирует показ намертво, пока мы в чистом режиме.
- */
-class LockableScrollHandle(context: Context) : DefaultScrollHandle(context) {
-
-    var locked = false
-        set(value) {
-            field = value
-            if (value) super.hide()
-        }
-
-    override fun show() {
-        if (!locked) super.show()
+        val files = recentFiles.load()
+        recentAdapter.submitList(files)
+        tvNoRecent.visibility = if (files.isEmpty()) View.VISIBLE else View.GONE
     }
 }
