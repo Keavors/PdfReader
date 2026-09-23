@@ -13,8 +13,11 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.PdfReader">
 
+        <!-- configChanges: поворот экрана не пересоздаёт активити, поэтому
+             документ не перечитывается заново и не теряет масштаб с прокруткой. -->
         <activity
             android:name=".MainActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:exported="true"
             android:launchMode="singleTop">
 
@@ -26,6 +29,26 @@
             <!-- Чтобы приложение предлагалось при открытии PDF из проводника -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/pdf" />
+            </intent-filter>
+
+            <!-- Часть проводников и мессенджеров не знает тип файла и отдаёт его
+                 как поток байтов - для таких опираемся на расширение. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:host="*" />
+                <data android:mimeType="application/octet-stream" />
+                <data android:pathPattern=".*\\.pdf" />
+                <data android:pathPattern=".*\\.PDF" />
+            </intent-filter>
+
+            <!-- "Поделиться -> PDF Reader" из другого приложения -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="application/pdf" />
             </intent-filter>

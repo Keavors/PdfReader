@@ -121,6 +121,8 @@ class RecentFilesStore(context: Context) {
         replace(previous, previous.filterNot { it.uri == target })
     }
 
+    fun clear() = replace(load(), emptyList())
+
     /**
      * Пишет новый список и отпускает постоянный доступ к выпавшим из него файлам.
      *

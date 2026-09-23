@@ -6,10 +6,21 @@
     <string name="cd_share">Поделиться</string>
     <string name="cd_open">Открыть файл</string>
     <string name="cd_settings">Настройки просмотра</string>
+    <string name="cd_outline">Оглавление</string>
+    <string name="cd_jump_to_page">Перейти к странице</string>
+
+    <!-- Счётчик страниц на панели: 12/340 -->
+    <string name="page_indicator">%1$d/%2$d</string>
 
     <!-- Список недавних файлов -->
     <string name="recent_title">Недавние файлы</string>
+    <string name="recent_clear">Очистить</string>
     <string name="recent_empty">Пока пусто — открой PDF кнопкой «папка» сверху</string>
+    <string name="recent_unavailable">файл недоступен</string>
+    <string name="recent_remove_title">Убрать из списка?</string>
+    <string name="action_remove">Убрать</string>
+    <string name="recent_clear_title">Очистить список недавних?</string>
+    <string name="action_clear">Очистить</string>
 
     <!-- Диалог режима просмотра -->
     <string name="settings_title">Режим просмотра</string>
@@ -19,8 +30,19 @@
     <string name="settings_pages">Страницы</string>
     <string name="settings_pages_continuous">Слитно, все подряд</string>
     <string name="settings_pages_single">По одной странице</string>
+    <string name="settings_reading">Чтение</string>
+    <string name="settings_night_mode">Ночной режим (инверсия цветов)</string>
+    <string name="settings_keep_screen_on">Не гасить экран за чтением</string>
+    <string name="settings_lock_orientation">Не переворачивать экран</string>
     <string name="action_apply">Применить</string>
     <string name="action_cancel">Отмена</string>
+
+    <!-- Оглавление и переход к странице -->
+    <string name="outline_title">Оглавление</string>
+    <string name="outline_page">стр. %1$d</string>
+    <string name="jump_title">Перейти к странице</string>
+    <string name="jump_hint">Страница от 1 до %1$d</string>
+    <string name="action_go">Перейти</string>
 
     <!-- Документ под паролем -->
     <string name="password_title">Документ защищён паролем</string>
@@ -32,4 +54,5 @@
     <string name="error_open_failed">Не удалось открыть файл</string>
     <string name="error_file_gone">Файл больше недоступен — удалён или доступ к нему закрыт</string>
     <string name="error_share_failed">Нечем поделиться файлом</string>
+    <string name="error_page_failed">Страница %1$d не отрисовалась</string>
 </resources>

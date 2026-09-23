@@ -16,6 +16,20 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    buildFeatures {
+        viewBinding = true
+    }
+
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+
+        // Robolectric подменяет внутренности JDK, которые с 17-й версии закрыты
+        // модульной системой. Без этого он не поднимает контекст приложения.
+        unitTests.all { test ->
+            test.jvmArgs("--add-exports=java.base/jdk.internal.access=ALL-UNNAMED")
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
@@ -28,6 +42,13 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
+    }
+
+    kotlin {
+        // Тот же уровень, что у Java выше: иначе он зависит от версии плагина.
+        compilerOptions {
+            jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11
+        }
     }
 }
 
@@ -43,6 +64,7 @@ dependencies {
     implementation(libs.android.pdf.viewer)
     testImplementation(libs.junit)
     testImplementation(libs.json)
+    testImplementation(libs.robolectric)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.junit)
 }

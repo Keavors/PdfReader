@@ -4,16 +4,17 @@ import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ContentResolver
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.net.Uri
 import android.os.Bundle
 import android.provider.OpenableColumns
-import android.view.View
-import android.widget.TextView
+import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.StringRes
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.IntentCompat
 import androidx.core.graphics.Insets
 import androidx.core.net.toUri
 import androidx.core.os.BundleCompat
@@ -21,10 +22,10 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.core.view.isVisible
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.recyclerview.widget.RecyclerView
-import com.github.barteksc.pdfviewer.PDFView
+import com.example.pdfreader.databinding.ActivityMainBinding
 import com.github.barteksc.pdfviewer.util.FitPolicy
 import com.shockwave.pdfium.PdfPasswordException
 import kotlinx.coroutines.Dispatchers
@@ -45,6 +46,9 @@ private const val STATE_PAGE = "page"
 private const val STATE_HIDDEN = "hidden"
 private const val STATE_PASSWORD = "password"
 
+private const val REQUEST_REMOVE_RECENT = "remove_recent"
+private const val REQUEST_CLEAR_RECENT = "clear_recent"
+
 /**
  * Единственный экран приложения: список недавних файлов, пока документ не выбран,
  * и просмотрщик, когда выбран.
@@ -54,18 +58,13 @@ private const val STATE_PASSWORD = "password"
  */
 class MainActivity : AppCompatActivity() {
 
-    private lateinit var rootView: View
-    private lateinit var pdfView: PDFView
-    private lateinit var topBar: View
-    private lateinit var titleView: TextView
-    private lateinit var emptyHint: View
-    private lateinit var btnBack: View
-    private lateinit var btnShare: View
-    private lateinit var rvRecent: RecyclerView
-    private lateinit var tvNoRecent: TextView
+    private lateinit var binding: ActivityMainBinding
 
     private lateinit var recentFiles: RecentFilesStore
-    private val recentAdapter = RecentFilesAdapter { openDocument(it.uri.toUri()) }
+    private val recentAdapter = RecentFilesAdapter(
+        onClick = ::openRecentFile,
+        onLongClick = ::confirmRemoveRecent,
+    )
 
     private var scrollHandle: LockableScrollHandle? = null
 
@@ -73,6 +72,7 @@ class MainActivity : AppCompatActivity() {
     private var currentName = ""
     private var currentPassword: String? = null
     private var currentPage = 0
+    private var pageCount = 0
     private var uiHidden = false
 
     /** Документ дошёл до конца загрузки — только такой стоит помнить. */
@@ -80,6 +80,9 @@ class MainActivity : AppCompatActivity() {
 
     /** Последний тап пришёлся на ссылку внутри документа, а не на пустое место. */
     private var linkTapped = false
+
+    /** Об ошибке отрисовки говорим один раз на документ, а не на каждую страницу. */
+    private var pageErrorReported = false
 
     /** Имя файла у провайдера спрашиваем в фоне: он может отвечать медленно. */
     private var nameJob: Job? = null
@@ -104,27 +107,21 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false) // рисуем от края до края
-        setContentView(R.layout.activity_main)
+        binding = ActivityMainBinding.inflate(layoutInflater)
+        setContentView(binding.root)
 
         recentFiles = RecentFilesStore(this)
 
-        rootView = findViewById(R.id.root)
-        pdfView = findViewById(R.id.pdfView)
-        topBar = findViewById(R.id.topBar)
-        titleView = findViewById(R.id.titleView)
-        emptyHint = findViewById(R.id.emptyHint)
-        btnBack = findViewById(R.id.btnBack)
-        btnShare = findViewById(R.id.btnShare)
-        rvRecent = findViewById(R.id.rvRecent)
-        tvNoRecent = findViewById(R.id.tvNoRecent)
+        binding.btnOpen.setOnClickListener { pickFile() }
+        binding.btnSettings.setOnClickListener { showSettingsDialog() }
+        binding.btnBack.setOnClickListener { closeDocument() }
+        binding.btnShare.setOnClickListener { shareCurrentFile() }
+        binding.btnOutline.setOnClickListener { showOutline() }
+        binding.pageIndicator.setOnClickListener { showJumpToPage() }
+        binding.btnClearRecent.setOnClickListener { confirmClearRecent() }
 
-        findViewById<View>(R.id.btnOpen).setOnClickListener { pickFile() }
-        findViewById<View>(R.id.btnSettings).setOnClickListener { showSettingsDialog() }
-        btnBack.setOnClickListener { closeDocument() }
-        btnShare.setOnClickListener { shareCurrentFile() }
-
-        rvRecent.layoutManager = LinearLayoutManager(this)
-        rvRecent.adapter = recentAdapter
+        binding.rvRecent.layoutManager = LinearLayoutManager(this)
+        binding.rvRecent.adapter = recentAdapter
 
         onBackPressedDispatcher.addCallback(this, backCallback)
         listenToDialogs()
@@ -132,7 +129,7 @@ class MainActivity : AppCompatActivity() {
         // ЕДИНСТВЕННЫЙ слушатель инсетов — на корневом layout.
         // systemBars + displayCutout: вырез камеры это ОТДЕЛЬНЫЙ тип, в systemBars его нет.
         // В альбомной ориентации навигационная панель уезжает на боковую грань.
-        ViewCompat.setOnApplyWindowInsetsListener(rootView) { _, insets ->
+        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { _, insets ->
             barInsets = insets.getInsetsIgnoringVisibility(
                 WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
             )
@@ -199,7 +196,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        pdfView.recycle() // иначе документ висит в нативной памяти до сборки мусора
+        binding.pdfView.recycle() // иначе документ висит в нативной памяти до сборки мусора
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -208,8 +205,13 @@ class MainActivity : AppCompatActivity() {
         if (hasFocus && uiHidden) applyUiState()
     }
 
-    private fun intentUri(intent: Intent?): Uri? =
-        if (intent?.action == Intent.ACTION_VIEW) intent.data else null
+    /** Ссылка на документ из интента: и «открыть», и «поделиться с нами». */
+    private fun intentUri(intent: Intent?): Uri? = when (intent?.action) {
+        Intent.ACTION_VIEW -> intent.data
+        Intent.ACTION_SEND ->
+            IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
+        else -> null
+    }
 
     /**
      * Просит постоянный доступ к файлу, чтобы его можно было открыть из списка
@@ -231,8 +233,12 @@ class MainActivity : AppCompatActivity() {
      * после перезапуска по ней уже ничего не откроется.
      */
     private fun hasDurableAccess(uri: Uri): Boolean =
-        uri.scheme != ContentResolver.SCHEME_CONTENT ||
-            contentResolver.persistedUriPermissions.any { it.uri == uri && it.isReadPermission }
+        uri.scheme != ContentResolver.SCHEME_CONTENT || uri.toString() in durableUris()
+
+    private fun durableUris(): Set<String> =
+        contentResolver.persistedUriPermissions
+            .filter { it.isReadPermission }
+            .mapTo(HashSet()) { it.uri.toString() }
 
     private fun pickFile() = openPdfLauncher.launch(arrayOf(PDF_MIME_TYPE))
 
@@ -243,25 +249,22 @@ class MainActivity : AppCompatActivity() {
         currentUri = uri
         currentPage = page
         currentPassword = password
+        pageCount = 0
         documentLoaded = false
+        pageErrorReported = false
 
-        emptyHint.visibility = View.GONE
-        pdfView.visibility = View.VISIBLE
-        btnBack.visibility = View.VISIBLE
-        btnShare.visibility = View.VISIBLE
-        backCallback.isEnabled = true
-
+        val settings = ReaderSettings.load(this)
+        showReaderChrome(settings)
         showName(fallbackName(uri))
         resolveNameAsync(uri)
 
-        val settings = ReaderSettings.load(this)
         val fitPolicy = when {
             settings.singlePage -> FitPolicy.BOTH   // страница целиком помещается на экран
             settings.horizontal -> FitPolicy.HEIGHT // лента по горизонтали - вписываем по высоте
             else -> FitPolicy.WIDTH                 // лента по вертикали - вписываем по ширине
         }
 
-        pdfView.fromUri(uri)
+        binding.pdfView.fromUri(uri)
             .password(password)
             .defaultPage(page)
             .swipeHorizontal(settings.horizontal)
@@ -271,18 +274,51 @@ class MainActivity : AppCompatActivity() {
             .spacing(if (settings.singlePage) 0 else PAGE_SPACING)
             .pageFitPolicy(fitPolicy)
             .fitEachPage(true)
+            .nightMode(settings.nightMode)
             .scrollHandle(LockableScrollHandle(this).also {
                 it.locked = uiHidden
                 scrollHandle = it
             })
             .enableAntialiasing(true)
             .enableAnnotationRendering(true)
-            .linkHandler(ReportingLinkHandler(pdfView) { linkTapped = true })
-            .onPageChange { changed, _ -> currentPage = changed }
-            .onLoad { rememberOpened() }
+            .linkHandler(ReportingLinkHandler(binding.pdfView) { linkTapped = true })
+            .onPageChange { changed, _ ->
+                currentPage = changed
+                updatePageIndicator()
+            }
+            .onLoad { pages -> onDocumentLoaded(pages) }
             .onTap { onDocumentTap(); true }                // одиночный тап = скрыть/показать всё
+            .onPageError { failed, _ -> reportPageError(failed) }
             .onError { handleOpenError(it) }
             .load()
+    }
+
+    /** Панель и окно в режиме чтения. */
+    private fun showReaderChrome(settings: ReaderSettings) {
+        binding.emptyHint.isVisible = false
+        binding.pdfView.isVisible = true
+        binding.btnBack.isVisible = true
+        binding.btnShare.isVisible = true
+        binding.btnOpen.isVisible = false // с открытым документом панели и так тесно
+        backCallback.isEnabled = true
+        applyReadingPreferences(settings, reading = true)
+    }
+
+    /**
+     * Настройки, которые касаются не самого документа, а окна вокруг него.
+     * За списком недавних они не нужны, поэтому снимаются при закрытии файла.
+     */
+    private fun applyReadingPreferences(settings: ReaderSettings, reading: Boolean) {
+        if (reading && settings.keepScreenOn) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+        requestedOrientation = if (reading && settings.lockOrientation) {
+            ActivityInfo.SCREEN_ORIENTATION_LOCKED
+        } else {
+            ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
     }
 
     /**
@@ -293,17 +329,38 @@ class MainActivity : AppCompatActivity() {
      * был ли тап переходом по ссылке.
      */
     private fun onDocumentTap() {
-        pdfView.post {
+        binding.pdfView.post {
             if (!linkTapped) toggleUi()
             linkTapped = false
         }
     }
 
     /** Документ открылся — теперь его можно записать в недавние. */
-    private fun rememberOpened() {
+    private fun onDocumentLoaded(pages: Int) {
         documentLoaded = true
+        pageCount = pages
+        updatePageIndicator()
+        binding.btnOutline.isVisible = binding.pdfView.tableOfContents.isNotEmpty()
         val uri = currentUri ?: return
         if (hasDurableAccess(uri)) recentFiles.add(uri, currentName, currentPage)
+    }
+
+    private fun updatePageIndicator() {
+        binding.pageIndicator.isVisible = pageCount > 0
+        if (pageCount > 0) {
+            binding.pageIndicator.text =
+                getString(R.string.page_indicator, currentPage + 1, pageCount)
+        }
+    }
+
+    private fun reportPageError(page: Int) {
+        if (pageErrorReported) return
+        pageErrorReported = true
+        Toast.makeText(
+            this,
+            getString(R.string.error_page_failed, page + 1),
+            Toast.LENGTH_SHORT,
+        ).show()
     }
 
     private fun rememberPosition() {
@@ -349,29 +406,87 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun askPassword(retry: Boolean) {
+        showDialog(PasswordDialogFragment.TAG) { PasswordDialogFragment.newInstance(retry) }
+    }
+
+    private fun showSettingsDialog() {
+        showDialog(SettingsDialogFragment.TAG) { SettingsDialogFragment() }
+    }
+
+    private fun showOutline() {
+        val outline = OutlineDialogFragment.newInstance(binding.pdfView.tableOfContents) ?: return
+        showDialog(OutlineDialogFragment.TAG) { outline }
+    }
+
+    private fun showJumpToPage() {
+        if (pageCount <= 0) return
+        showDialog(JumpToPageDialogFragment.TAG) {
+            JumpToPageDialogFragment.newInstance(currentPage, pageCount)
+        }
+    }
+
+    private fun confirmRemoveRecent(item: RecentFileItem) {
+        showDialog(ConfirmDialogFragment.TAG) {
+            ConfirmDialogFragment.newInstance(
+                requestKey = REQUEST_REMOVE_RECENT,
+                title = R.string.recent_remove_title,
+                positive = R.string.action_remove,
+                message = item.file.name,
+                payload = item.file.uri,
+            )
+        }
+    }
+
+    private fun confirmClearRecent() {
+        showDialog(ConfirmDialogFragment.TAG) {
+            ConfirmDialogFragment.newInstance(
+                requestKey = REQUEST_CLEAR_RECENT,
+                title = R.string.recent_clear_title,
+                positive = R.string.action_clear,
+            )
+        }
+    }
+
+    /** Показывает диалог, если это ещё уместно и такой уже не висит на экране. */
+    private fun showDialog(tag: String, create: () -> androidx.fragment.app.DialogFragment) {
         if (isFinishing || supportFragmentManager.isStateSaved) return
-        if (supportFragmentManager.findFragmentByTag(PasswordDialogFragment.TAG) != null) return
-        PasswordDialogFragment.newInstance(retry)
-            .show(supportFragmentManager, PasswordDialogFragment.TAG)
+        if (supportFragmentManager.findFragmentByTag(tag) != null) return
+        create().show(supportFragmentManager, tag)
     }
 
     private fun listenToDialogs() {
-        supportFragmentManager.setFragmentResultListener(
-            SettingsDialogFragment.RESULT_KEY,
-            this,
-        ) { _, _ ->
+        onDialogResult(SettingsDialogFragment.RESULT_KEY) {
             // Перечитываем с новыми настройками, текущая страница сохраняется.
-            currentUri?.let { openPdf(it, currentPage, currentPassword) }
+            val uri = currentUri
+            if (uri != null) openPdf(uri, currentPage, currentPassword)
+            else applyReadingPreferences(ReaderSettings.load(this), reading = false)
         }
-        supportFragmentManager.setFragmentResultListener(
-            PasswordDialogFragment.RESULT_KEY,
-            this,
-        ) { _, result ->
+        onDialogResult(PasswordDialogFragment.RESULT_KEY) { result ->
             val password = result.getString(PasswordDialogFragment.EXTRA_PASSWORD)
             val uri = currentUri
             if (password.isNullOrEmpty() || uri == null) closeDocument()
             else openPdf(uri, currentPage, password)
         }
+        onDialogResult(OutlineDialogFragment.RESULT_KEY) { result ->
+            binding.pdfView.jumpTo(result.getInt(OutlineDialogFragment.EXTRA_PAGE), true)
+        }
+        onDialogResult(JumpToPageDialogFragment.RESULT_KEY) { result ->
+            binding.pdfView.jumpTo(result.getInt(JumpToPageDialogFragment.EXTRA_PAGE), true)
+        }
+        onDialogResult(REQUEST_REMOVE_RECENT) { result ->
+            result.getString(ConfirmDialogFragment.EXTRA_PAYLOAD)?.let {
+                recentFiles.remove(it.toUri())
+            }
+            showRecentFiles()
+        }
+        onDialogResult(REQUEST_CLEAR_RECENT) {
+            recentFiles.clear()
+            showRecentFiles()
+        }
+    }
+
+    private fun onDialogResult(key: String, handle: (Bundle) -> Unit) {
+        supportFragmentManager.setFragmentResultListener(key, this) { _, result -> handle(result) }
     }
 
     private fun closeDocument() {
@@ -383,17 +498,18 @@ class MainActivity : AppCompatActivity() {
         currentName = ""
         currentPassword = null
         currentPage = 0
+        pageCount = 0
         documentLoaded = false
         nameJob?.cancel()
         scrollHandle = null
         backCallback.isEnabled = false
-        pdfView.recycle()
+        binding.pdfView.recycle()
         showRecentFiles()
     }
 
     private fun showName(name: String) {
         currentName = name
-        titleView.text = name
+        binding.titleView.text = name
     }
 
     /**
@@ -409,7 +525,9 @@ class MainActivity : AppCompatActivity() {
             val name = withContext(Dispatchers.IO) { queryDisplayName(uri) } ?: return@launch
             if (currentUri != uri) return@launch
             showName(name)
-            if (documentLoaded) rememberOpened()
+            if (documentLoaded && hasDurableAccess(uri)) {
+                recentFiles.add(uri, name, currentPage)
+            }
         }
     }
 
@@ -467,16 +585,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun applyUiState() {
-        val controller = WindowCompat.getInsetsController(window, rootView)
+        val controller = WindowCompat.getInsetsController(window, binding.root)
         if (uiHidden) {
             // Прячем ВСЁ: панель приложения, ползунок, статус-бар, кнопки навигации.
-            topBar.visibility = View.GONE
+            binding.topBar.isVisible = false
             scrollHandle?.locked = true
             controller.systemBarsBehavior =
                 WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             controller.hide(WindowInsetsCompat.Type.systemBars())
         } else {
-            topBar.visibility = View.VISIBLE
+            binding.topBar.isVisible = true
             scrollHandle?.locked = false
             scrollHandle?.show()
             scrollHandle?.hideDelayed() // появился вместе с UI и сам растает через секунду
@@ -494,16 +612,12 @@ class MainActivity : AppCompatActivity() {
      * как start/end и в языках с письмом справа налево не должны переезжать.
      */
     private fun applyPaddings() {
+        val topBar = binding.topBar
         if (uiHidden) {
-            rootView.setPadding(0, 0, 0, 0)
-            topBar.setPaddingRelative(
-                topBar.paddingStart,
-                0,
-                topBar.paddingEnd,
-                topBar.paddingBottom,
-            )
+            binding.root.setPadding(0, 0, 0, 0)
+            topBar.setPaddingRelative(topBar.paddingStart, 0, topBar.paddingEnd, topBar.paddingBottom)
         } else {
-            rootView.setPadding(barInsets.left, 0, barInsets.right, barInsets.bottom)
+            binding.root.setPadding(barInsets.left, 0, barInsets.right, barInsets.bottom)
             topBar.setPaddingRelative(
                 topBar.paddingStart,
                 barInsets.top,
@@ -513,23 +627,41 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun showSettingsDialog() {
-        if (supportFragmentManager.isStateSaved) return
-        SettingsDialogFragment().show(supportFragmentManager, SettingsDialogFragment.TAG)
+    private fun openRecentFile(item: RecentFileItem) {
+        if (item.available) {
+            openDocument(item.file.uri.toUri())
+            return
+        }
+        Toast.makeText(this, R.string.error_file_gone, Toast.LENGTH_LONG).show()
+        recentFiles.remove(item.file.uri.toUri())
+        showRecentFiles()
     }
 
     /** Экран без открытого документа: заголовок и список недавних файлов. */
     private fun showRecentFiles() {
-        emptyHint.visibility = View.VISIBLE
-        pdfView.visibility = View.GONE
-        btnBack.visibility = View.GONE
-        btnShare.visibility = View.GONE
-        titleView.setText(R.string.app_name)
+        binding.emptyHint.isVisible = true
+        binding.pdfView.isVisible = false
+        binding.btnBack.isVisible = false
+        binding.btnShare.isVisible = false
+        binding.btnOutline.isVisible = false
+        binding.pageIndicator.isVisible = false
+        binding.btnOpen.isVisible = true
+        binding.titleView.setText(R.string.app_name)
         uiHidden = false // к списку всегда возвращаемся с видимыми барами
         applyUiState()
+        applyReadingPreferences(ReaderSettings.load(this), reading = false)
 
-        val files = recentFiles.load()
-        recentAdapter.submitList(files)
-        tvNoRecent.visibility = if (files.isEmpty()) View.VISIBLE else View.GONE
+        val durable = durableUris()
+        val items = recentFiles.load().map { file ->
+            RecentFileItem(
+                file = file,
+                folder = readablePath(file.uri),
+                available = !file.uri.startsWith("${ContentResolver.SCHEME_CONTENT}:") ||
+                    file.uri in durable,
+            )
+        }
+        recentAdapter.submitList(items)
+        binding.tvNoRecent.isVisible = items.isEmpty()
+        binding.btnClearRecent.isVisible = items.isNotEmpty()
     }
 }
