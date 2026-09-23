@@ -16,6 +16,7 @@ import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.StringRes
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.FileProvider
 import androidx.core.content.IntentCompat
 import androidx.core.graphics.Insets
 import androidx.core.net.toUri
@@ -34,6 +35,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.io.FileNotFoundException
 import java.time.ZoneId
 import java.util.Date
@@ -96,6 +98,12 @@ class MainActivity : AppCompatActivity() {
     /** Имя файла у провайдера спрашиваем в фоне: он может отвечать медленно. */
     private var nameJob: Job? = null
 
+    /** Имя и размер файла уже известны — без них нельзя перенести его к себе. */
+    private var metadataResolved = false
+
+    /** Перенос документа в своё хранилище. */
+    private var importJob: Job? = null
+
     /** Размеры системных баров и выреза камеры — известны, даже когда бары спрятаны. */
     private var barInsets: Insets = Insets.NONE
 
@@ -148,6 +156,10 @@ class MainActivity : AppCompatActivity() {
 
         restoreOrOpen(savedInstanceState)
         applyUiState()
+
+        // Копии, на которые уже ничто не ссылается: остаются, если приложение
+        // убили посреди переноса файла.
+        lifecycleScope.launch(Dispatchers.IO) { recentFiles.deleteOrphanCopies() }
     }
 
     /**
@@ -261,7 +273,9 @@ class MainActivity : AppCompatActivity() {
         currentSize = 0
         pageCount = 0
         documentLoaded = false
+        metadataResolved = false
         pageErrorReported = false
+        importJob?.cancel()
 
         val settings = ReaderSettings.load(this)
         showReaderChrome(settings)
@@ -354,17 +368,54 @@ class MainActivity : AppCompatActivity() {
         rememberOpened()
     }
 
-    /** Записывает открытый документ в недавние — со всем, что о нём известно. */
+    /**
+     * Записывает открытый документ в недавние — со всем, что о нём известно.
+     *
+     * Если доступ к файлу выдан на один сеанс (так делают мессенджеры и почта),
+     * документ сначала переносится в хранилище приложения, и список ссылается
+     * уже на копию — иначе запись в нём была бы нерабочей.
+     */
     private fun rememberOpened() {
         val uri = currentUri ?: return
-        if (!documentLoaded || !hasDurableAccess(uri)) return
-        recentFiles.add(
-            uri = uri,
-            name = currentName,
-            page = currentPage,
-            size = currentSize,
-            openedAt = System.currentTimeMillis(),
-        )
+        if (!documentLoaded) return
+        if (hasDurableAccess(uri)) {
+            recentFiles.add(
+                uri = uri,
+                name = currentName,
+                page = currentPage,
+                size = currentSize,
+                openedAt = System.currentTimeMillis(),
+            )
+            return
+        }
+        // Имя и размер задают имя копии, без них переносить рано.
+        if (metadataResolved) importCurrentDocument(uri)
+    }
+
+    /**
+     * Переносит открытый документ к себе, пока его ещё читают.
+     *
+     * После переноса приложение работает уже с копией: её можно открыть
+     * когда угодно, отдать в "Поделиться" и запомнить в ней страницу.
+     */
+    private fun importCurrentDocument(source: Uri) {
+        if (importJob?.isActive == true) return
+        val name = currentName
+        val size = currentSize
+        importJob = lifecycleScope.launch {
+            val copy = withContext(Dispatchers.IO) {
+                ImportedDocuments(this@MainActivity).copy(source, name, size)
+            } ?: return@launch
+            if (currentUri != source) return@launch
+            currentUri = copy
+            recentFiles.add(
+                uri = copy,
+                name = name,
+                page = currentPage,
+                size = size,
+                openedAt = System.currentTimeMillis(),
+            )
+        }
     }
 
     private fun updatePageIndicator() {
@@ -553,14 +604,22 @@ class MainActivity : AppCompatActivity() {
             if (currentUri != uri) return@launch
             meta.name?.let { showName(it) }
             currentSize = meta.size
+            metadataResolved = true
             rememberOpened()
         }
     }
 
-    private fun queryMetadata(uri: Uri): DocumentMeta =
-        metadata(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE))
+    private fun queryMetadata(uri: Uri): DocumentMeta {
+        // У своей копии всё спрашиваем прямо у файла: провайдера для схемы
+        // file нет, и запрос к ContentResolver по ней вернёт пустоту.
+        if (uri.scheme == ContentResolver.SCHEME_FILE) {
+            val file = uri.path?.let(::File)
+            return DocumentMeta(name = file?.name, size = file?.length() ?: 0)
+        }
+        return metadata(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE))
             ?: metadata(uri, null) // провайдер может не понять проекцию
             ?: DocumentMeta(name = null, size = 0)
+    }
 
     private fun metadata(uri: Uri, projection: Array<String>?): DocumentMeta? = try {
         contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
@@ -594,7 +653,7 @@ class MainActivity : AppCompatActivity() {
      * но открыть по ней ничего не может.
      */
     private fun shareCurrentFile() {
-        val uri = currentUri ?: return
+        val uri = currentUri?.let(::shareableUri) ?: return
         val name = currentName.ifEmpty { getString(R.string.default_document_name) }
         val send = Intent(Intent.ACTION_SEND).apply {
             type = PDF_MIME_TYPE
@@ -607,6 +666,23 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent.createChooser(send, getString(R.string.cd_share)))
         } catch (_: ActivityNotFoundException) {
             Toast.makeText(this, R.string.error_share_failed, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    /**
+     * Ссылка, которую не стыдно отдать наружу.
+     *
+     * Свою копию нельзя передавать как file:// — система такое запрещает.
+     * Для неё выдаём ссылку через провайдера, чужие ссылки идут как есть.
+     */
+    private fun shareableUri(uri: Uri): Uri? {
+        if (uri.scheme != ContentResolver.SCHEME_FILE) return uri
+        val file = uri.path?.let(::File) ?: return null
+        return try {
+            FileProvider.getUriForFile(this, "$packageName.files", file)
+        } catch (_: IllegalArgumentException) {
+            Toast.makeText(this, R.string.error_share_failed, Toast.LENGTH_LONG).show()
+            null
         }
     }
 
@@ -657,6 +733,14 @@ class MainActivity : AppCompatActivity() {
                 topBar.paddingBottom,
             )
         }
+    }
+
+    /** Откроется ли запись из списка: у чужого файла спрашиваем права, у своей копии — есть ли она. */
+    private fun isStillAvailable(uri: String, durable: Set<String>): Boolean = when {
+        uri.startsWith("${ContentResolver.SCHEME_CONTENT}:") -> uri in durable
+        uri.startsWith("${ContentResolver.SCHEME_FILE}:") ->
+            uri.toUri().path?.let { File(it).isFile } == true
+        else -> true
     }
 
     private fun openRecentFile(item: RecentFileItem) {
@@ -714,8 +798,7 @@ class MainActivity : AppCompatActivity() {
                 file = file,
                 folder = readablePath(file.uri),
                 openedAt = formatOpenedAt(file.openedAt, now, zone),
-                available = !file.uri.startsWith("${ContentResolver.SCHEME_CONTENT}:") ||
-                    file.uri in durable,
+                available = isStillAvailable(file.uri, durable),
             )
         }
         recentAdapter.submitList(items)

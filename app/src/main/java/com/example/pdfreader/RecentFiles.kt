@@ -1,5 +1,6 @@
 package com.example.pdfreader
 
+import android.content.ContentResolver
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -144,8 +145,12 @@ class RecentFilesStore(context: Context) {
 
     private val appContext = context.applicationContext
     private val prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private val imported = ImportedDocuments(appContext)
 
     fun load(): List<RecentFile> = parseRecentFiles(prefs.getString(KEY_RECENT, null))
+
+    /** Выносит копии документов, которых в списке уже нет. Блокирующий вызов. */
+    fun deleteOrphanCopies() = imported.deleteOrphans(load().map { it.uri })
 
     /**
      * Страница, на которой этот файл закрыли в прошлый раз.
@@ -182,18 +187,26 @@ class RecentFilesStore(context: Context) {
     fun clear() = replace(load(), emptyList())
 
     /**
-     * Пишет новый список и отпускает постоянный доступ к выпавшим из него файлам.
+     * Пишет новый список и убирает за выпавшими из него файлами: отпускает
+     * постоянный доступ и выносит нашу копию документа, если она была.
      *
-     * Такие разрешения не истекают сами, а системный запас их на приложение
+     * Разрешения не истекают сами, а системный запас их на приложение
      * ограничен: без этого рано или поздно перестали бы выдаваться новые.
+     * Копии же иначе просто лежали бы мёртвым грузом.
      */
     private fun replace(previous: List<RecentFile>, current: List<RecentFile>) {
         prefs.edit { putString(KEY_RECENT, encodeRecentFiles(current)) }
         val kept = current.mapTo(HashSet()) { it.uri }
-        previous.forEach { if (it.uri !in kept) releaseAccess(it.uri) }
+        previous.forEach {
+            if (it.uri !in kept) {
+                releaseAccess(it.uri)
+                imported.forget(it.uri)
+            }
+        }
     }
 
     private fun releaseAccess(uri: String) {
+        if (!uri.startsWith("${ContentResolver.SCHEME_CONTENT}:")) return
         try {
             appContext.contentResolver.releasePersistableUriPermission(
                 uri.toUri(),
