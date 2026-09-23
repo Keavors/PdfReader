@@ -19,8 +19,15 @@
     <string name="recent_unavailable">файл недоступен</string>
     <string name="opened_today">сегодня, %1$s</string>
     <string name="opened_yesterday">вчера, %1$s</string>
+    <string name="recent_action_reveal">Показать папку</string>
+    <string name="recent_action_remove">Убрать из списка</string>
+    <string name="recent_action_delete">Удалить файл с устройства</string>
     <string name="recent_remove_title">Убрать из списка?</string>
     <string name="action_remove">Убрать</string>
+    <string name="recent_delete_title">Удалить файл с устройства?</string>
+    <string name="recent_delete_message">%1$s будет удалён безвозвратно.</string>
+    <string name="action_delete">Удалить</string>
+    <string name="file_deleted">Файл удалён</string>
     <string name="recent_clear_title">Очистить список недавних?</string>
     <string name="action_clear">Очистить</string>
 
@@ -56,5 +63,7 @@
     <string name="error_open_failed">Не удалось открыть файл</string>
     <string name="error_file_gone">Файл больше недоступен — удалён или доступ к нему закрыт</string>
     <string name="error_share_failed">Нечем поделиться файлом</string>
+    <string name="error_delete_failed">Не удалось удалить файл — приложению не дали на это прав</string>
+    <string name="error_no_folder_app">Нечем открыть папку на этом устройстве</string>
     <string name="error_page_failed">Страница %1$d не отрисовалась</string>
 </resources>

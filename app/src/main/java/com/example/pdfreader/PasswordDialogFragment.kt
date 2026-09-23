@@ -5,7 +5,6 @@ import android.content.DialogInterface
 import android.os.Bundle
 import android.view.View
 import android.widget.EditText
-import androidx.core.os.bundleOf
 import androidx.fragment.app.DialogFragment
 import androidx.fragment.app.setFragmentResult
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -26,7 +25,10 @@ class PasswordDialogFragment : DialogFragment() {
             .setTitle(R.string.password_title)
             .setView(view)
             .setPositiveButton(R.string.action_open) { _, _ ->
-                setFragmentResult(RESULT_KEY, bundleOf(EXTRA_PASSWORD to input.text.toString()))
+                setFragmentResult(
+                    RESULT_KEY,
+                    Bundle().apply { putString(EXTRA_PASSWORD, input.text.toString()) },
+                )
             }
             .setNegativeButton(R.string.action_cancel) { _, _ -> giveUp() }
             .create()
@@ -48,7 +50,7 @@ class PasswordDialogFragment : DialogFragment() {
 
         /** @param retry предыдущий пароль не подошёл — предупредить об этом. */
         fun newInstance(retry: Boolean) = PasswordDialogFragment().apply {
-            arguments = bundleOf(ARG_RETRY to retry)
+            arguments = Bundle().apply { putBoolean(ARG_RETRY, retry) }
         }
     }
 }

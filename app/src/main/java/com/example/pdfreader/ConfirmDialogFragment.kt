@@ -3,7 +3,6 @@ package com.example.pdfreader
 import android.app.Dialog
 import android.os.Bundle
 import androidx.annotation.StringRes
-import androidx.core.os.bundleOf
 import androidx.fragment.app.DialogFragment
 import androidx.fragment.app.setFragmentResult
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -25,7 +24,7 @@ class ConfirmDialogFragment : DialogFragment() {
             .setPositiveButton(args.getInt(ARG_POSITIVE)) { _, _ ->
                 setFragmentResult(
                     args.getString(ARG_REQUEST_KEY).orEmpty(),
-                    bundleOf(EXTRA_PAYLOAD to args.getString(ARG_PAYLOAD)),
+                    Bundle().apply { putString(EXTRA_PAYLOAD, args.getString(ARG_PAYLOAD)) },
                 )
             }
             .setNegativeButton(R.string.action_cancel, null)
@@ -51,13 +50,13 @@ class ConfirmDialogFragment : DialogFragment() {
             message: String? = null,
             payload: String? = null,
         ) = ConfirmDialogFragment().apply {
-            arguments = bundleOf(
-                ARG_REQUEST_KEY to requestKey,
-                ARG_TITLE to title,
-                ARG_POSITIVE to positive,
-                ARG_MESSAGE to message,
-                ARG_PAYLOAD to payload,
-            )
+            arguments = Bundle().apply {
+                putString(ARG_REQUEST_KEY, requestKey)
+                putInt(ARG_TITLE, title)
+                putInt(ARG_POSITIVE, positive)
+                putString(ARG_MESSAGE, message)
+                putString(ARG_PAYLOAD, payload)
+            }
         }
     }
 }

@@ -6,7 +6,6 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
-import androidx.core.os.bundleOf
 import androidx.fragment.app.DialogFragment
 import androidx.fragment.app.setFragmentResult
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -35,7 +34,7 @@ class OutlineDialogFragment : DialogFragment() {
         val list = RecyclerView(requireContext()).apply {
             layoutManager = LinearLayoutManager(context)
             adapter = OutlineAdapter(titles, pages, levels) { page ->
-                setFragmentResult(RESULT_KEY, bundleOf(EXTRA_PAGE to page))
+                setFragmentResult(RESULT_KEY, Bundle().apply { putInt(EXTRA_PAGE, page) })
                 dismiss()
             }
         }
@@ -99,11 +98,11 @@ class OutlineDialogFragment : DialogFragment() {
             val flat = flatten(bookmarks)
             if (flat.isEmpty()) return null
             return OutlineDialogFragment().apply {
-                arguments = bundleOf(
-                    ARG_TITLES to ArrayList(flat.map { it.title }),
-                    ARG_PAGES to flat.map { it.page }.toIntArray(),
-                    ARG_LEVELS to flat.map { it.level }.toIntArray(),
-                )
+                arguments = Bundle().apply {
+                    putStringArrayList(ARG_TITLES, ArrayList(flat.map { it.title }))
+                    putIntArray(ARG_PAGES, flat.map { it.page }.toIntArray())
+                    putIntArray(ARG_LEVELS, flat.map { it.level }.toIntArray())
+                }
             }
         }
 

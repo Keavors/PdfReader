@@ -210,7 +210,7 @@ class RecentFilesStore(context: Context) {
         try {
             appContext.contentResolver.releasePersistableUriPermission(
                 uri.toUri(),
-                Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
             )
         } catch (_: SecurityException) {
             // Постоянного доступа к этому файлу и не было — отпускать нечего.

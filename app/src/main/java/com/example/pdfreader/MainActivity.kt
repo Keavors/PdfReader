@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.net.Uri
 import android.os.Bundle
+import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import android.text.format.DateFormat
 import android.text.format.DateUtils
@@ -53,6 +54,7 @@ private const val STATE_PASSWORD = "password"
 
 private const val REQUEST_REMOVE_RECENT = "remove_recent"
 private const val REQUEST_CLEAR_RECENT = "clear_recent"
+private const val REQUEST_DELETE_FILE = "delete_file"
 
 /** На сколько причин вглубь разбираем исключение, чтобы не уйти в петлю. */
 private const val MAX_CAUSE_DEPTH = 8
@@ -71,8 +73,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var recentFiles: RecentFilesStore
     private val recentAdapter = RecentFilesAdapter(
         onClick = ::openRecentFile,
-        onLongClick = ::confirmRemoveRecent,
+        onLongClick = ::showRecentFileActions,
     )
+
+    private lateinit var importedDocs: ImportedDocuments
 
     private var scrollHandle: LockableScrollHandle? = null
 
@@ -116,6 +120,14 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+    /** Тот же пикер, но открытый на папке нужного файла — запасной способ показать её. */
+    private val pickInFolderLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            val uri = result.data?.data ?: return@registerForActivityResult
+            keepAccess(uri)
+            openDocument(uri)
+        }
+
     /** Системная кнопка "назад" сначала закрывает документ и только потом выходит. */
     private val backCallback = object : OnBackPressedCallback(false) {
         override fun handleOnBackPressed() = closeDocument()
@@ -128,6 +140,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         recentFiles = RecentFilesStore(this)
+        importedDocs = ImportedDocuments(this)
 
         binding.btnOpen.setOnClickListener { pickFile() }
         binding.btnSettings.setOnClickListener { showSettingsDialog() }
@@ -239,11 +252,21 @@ class MainActivity : AppCompatActivity() {
      * недавних и после перезапуска. Проводник такое разрешение даёт не всегда.
      */
     private fun keepAccess(uri: Uri) {
-        try {
-            contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        } catch (_: SecurityException) {
-            // Постоянного доступа не дали - на текущий сеанс прав и так хватит.
-        }
+        // Право на запись нужно, чтобы файл можно было удалить из списка недавних.
+        // Дают его не все источники, поэтому при отказе просим одно только чтение.
+        val readAndWrite = Intent.FLAG_GRANT_READ_URI_PERMISSION or
+            Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        if (takePersistable(uri, readAndWrite)) return
+        takePersistable(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+
+    /** @return удалось ли закрепить за приложением именно эти права. */
+    private fun takePersistable(uri: Uri, flags: Int): Boolean = try {
+        contentResolver.takePersistableUriPermission(uri, flags)
+        true
+    } catch (_: SecurityException) {
+        // Постоянного доступа не дали - на текущий сеанс прав и так хватит.
+        false
     }
 
     /**
@@ -404,7 +427,7 @@ class MainActivity : AppCompatActivity() {
         val size = currentSize
         importJob = lifecycleScope.launch {
             val copy = withContext(Dispatchers.IO) {
-                ImportedDocuments(this@MainActivity).copy(source, name, size)
+                importedDocs.copy(source, name, size)
             } ?: return@launch
             if (currentUri != source) return@launch
             currentUri = copy
@@ -498,16 +521,132 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun confirmRemoveRecent(item: RecentFileItem) {
+    /** Долгий тап по записи: показать папку, убрать из списка, удалить файл. */
+    private fun showRecentFileActions(item: RecentFileItem) {
+        // У перенесённой к себе копии нет папки на устройстве, а удалять её
+        // отдельно от записи незачем - она и так уйдёт вместе с ней.
+        val ownCopy = importedDocs.isImported(item.file.uri)
+        showDialog(RecentFileActionsDialogFragment.TAG) {
+            RecentFileActionsDialogFragment.newInstance(
+                name = item.file.name,
+                uri = item.file.uri,
+                canReveal = !ownCopy && folderUriOf(item.file.uri.toUri()) != null,
+                canDelete = !ownCopy,
+            )
+        }
+    }
+
+    private fun confirmRemoveRecent(uri: String, name: String) {
         showDialog(ConfirmDialogFragment.TAG) {
             ConfirmDialogFragment.newInstance(
                 requestKey = REQUEST_REMOVE_RECENT,
                 title = R.string.recent_remove_title,
                 positive = R.string.action_remove,
-                message = item.file.name,
-                payload = item.file.uri,
+                message = name,
+                payload = uri,
             )
         }
+    }
+
+    private fun confirmDeleteFile(uri: String, name: String) {
+        showDialog(ConfirmDialogFragment.TAG) {
+            ConfirmDialogFragment.newInstance(
+                requestKey = REQUEST_DELETE_FILE,
+                title = R.string.recent_delete_title,
+                positive = R.string.action_delete,
+                message = getString(R.string.recent_delete_message, name),
+                payload = uri,
+            )
+        }
+    }
+
+    /**
+     * Открывает папку с файлом в проводнике.
+     *
+     * Единого способа «показать файл в проводнике» в Android нет, поэтому
+     * пробуем два общепринятых интента подряд.
+     */
+    private fun revealFolder(uri: Uri) {
+        val folder = folderUriOf(uri) ?: return
+
+        // Сначала пробуем открыть папку в проводнике - так виден весь её
+        // настоящий вид, со всеми файлами.
+        val inFileManager = Intent(Intent.ACTION_VIEW)
+            .setDataAndType(folder, DocumentsContract.Document.MIME_TYPE_DIR)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        try {
+            startActivity(inFileManager)
+            return
+        } catch (_: ActivityNotFoundException) {
+            // Проводника, понимающего такой интент, на устройстве нет.
+        }
+
+        // Запасной путь: системный выбор файлов, открытый сразу на этой папке.
+        // Он есть всегда, и выбранный там PDF сразу откроется.
+        val picker = Intent(Intent.ACTION_OPEN_DOCUMENT)
+            .addCategory(Intent.CATEGORY_OPENABLE)
+            .setType(PDF_MIME_TYPE)
+            .putExtra(DocumentsContract.EXTRA_INITIAL_URI, folder)
+        try {
+            pickInFolderLauncher.launch(picker)
+        } catch (_: ActivityNotFoundException) {
+            Toast.makeText(this, R.string.error_no_folder_app, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    /**
+     * Папка, в которой лежит документ, или null — если источник её не называет.
+     *
+     * Идентификатор документа у проводников выглядит как `primary:Books/книга.pdf`,
+     * и папка получается отбрасыванием последней части. Провайдеры, которые
+     * вместо пути отдают числовой идентификатор, про папку ничего не сообщают —
+     * для таких записей действие не предлагается вовсе.
+     */
+    private fun folderUriOf(uri: Uri): Uri? {
+        if (uri.scheme != ContentResolver.SCHEME_CONTENT) return null
+        val authority = uri.authority ?: return null
+        return try {
+            if (!DocumentsContract.isDocumentUri(this, uri)) return null
+            val parentId = DocumentsContract.getDocumentId(uri).substringBeforeLast('/', "")
+            if (!parentId.contains(':')) return null
+            DocumentsContract.buildDocumentUri(authority, parentId)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /** Удаляет сам файл, а не только запись о нём. */
+    private fun deleteFromDevice(uri: String) {
+        val target = uri.toUri()
+        lifecycleScope.launch {
+            val deleted = withContext(Dispatchers.IO) { removeFromStorage(target) }
+            if (deleted) {
+                recentFiles.remove(target)
+                Toast.makeText(this@MainActivity, R.string.file_deleted, Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this@MainActivity, R.string.error_delete_failed, Toast.LENGTH_LONG)
+                    .show()
+            }
+            showRecentFiles()
+        }
+    }
+
+    private fun removeFromStorage(uri: Uri): Boolean = try {
+        when {
+            DocumentsContract.isDocumentUri(this, uri) ->
+                DocumentsContract.deleteDocument(contentResolver, uri)
+
+            uri.scheme == ContentResolver.SCHEME_CONTENT ->
+                contentResolver.delete(uri, null, null) > 0
+
+            uri.scheme == ContentResolver.SCHEME_FILE ->
+                uri.path?.let { File(it).delete() } == true
+
+            else -> false
+        }
+    } catch (_: Exception) {
+        // Прав на удаление не дали, или файла уже нет.
+        false
     }
 
     private fun confirmClearRecent() {
@@ -546,11 +685,24 @@ class MainActivity : AppCompatActivity() {
         onDialogResult(JumpToPageDialogFragment.RESULT_KEY) { result ->
             binding.pdfView.jumpTo(result.getInt(JumpToPageDialogFragment.EXTRA_PAGE), true)
         }
+        onDialogResult(RecentFileActionsDialogFragment.RESULT_KEY) { result ->
+            val uri = result.getString(RecentFileActionsDialogFragment.EXTRA_URI)
+                ?: return@onDialogResult
+            val name = result.getString(RecentFileActionsDialogFragment.EXTRA_NAME).orEmpty()
+            when (result.getString(RecentFileActionsDialogFragment.EXTRA_ACTION)) {
+                RecentFileActionsDialogFragment.ACTION_REVEAL -> revealFolder(uri.toUri())
+                RecentFileActionsDialogFragment.ACTION_DELETE -> confirmDeleteFile(uri, name)
+                else -> confirmRemoveRecent(uri, name)
+            }
+        }
         onDialogResult(REQUEST_REMOVE_RECENT) { result ->
             result.getString(ConfirmDialogFragment.EXTRA_PAYLOAD)?.let {
                 recentFiles.remove(it.toUri())
             }
             showRecentFiles()
+        }
+        onDialogResult(REQUEST_DELETE_FILE) { result ->
+            result.getString(ConfirmDialogFragment.EXTRA_PAYLOAD)?.let { deleteFromDevice(it) }
         }
         onDialogResult(REQUEST_CLEAR_RECENT) {
             recentFiles.clear()

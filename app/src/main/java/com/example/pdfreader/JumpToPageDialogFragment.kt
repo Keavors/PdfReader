@@ -3,7 +3,6 @@ package com.example.pdfreader
 import android.app.Dialog
 import android.os.Bundle
 import android.widget.EditText
-import androidx.core.os.bundleOf
 import androidx.fragment.app.DialogFragment
 import androidx.fragment.app.setFragmentResult
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -38,7 +37,7 @@ class JumpToPageDialogFragment : DialogFragment() {
     private fun jump(pageCount: Int) {
         val entered = input.text.toString().toIntOrNull() ?: return
         val page = entered.coerceIn(1, pageCount) - 1
-        setFragmentResult(RESULT_KEY, bundleOf(EXTRA_PAGE to page))
+        setFragmentResult(RESULT_KEY, Bundle().apply { putInt(EXTRA_PAGE, page) })
     }
 
     companion object {
@@ -49,7 +48,10 @@ class JumpToPageDialogFragment : DialogFragment() {
         private const val ARG_CURRENT = "current"
 
         fun newInstance(currentPage: Int, pageCount: Int) = JumpToPageDialogFragment().apply {
-            arguments = bundleOf(ARG_CURRENT to currentPage, ARG_PAGE_COUNT to pageCount)
+            arguments = Bundle().apply {
+                putInt(ARG_CURRENT, currentPage)
+                putInt(ARG_PAGE_COUNT, pageCount)
+            }
         }
     }
 }
