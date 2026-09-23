@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Список прочитанных документов никуда не уезжает.
+
+    allowBackup="false" отключает облачный бэкап, но с Android 12 перенос данных
+    на новое устройство он уже не закрывает - это отдельный канал, и правила
+    нужны обоим. Толку от переноса всё равно нет: ссылки на файлы на новом
+    устройстве не работают, прав на них там нет.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude
+            domain="sharedpref"
+            path="reader_prefs.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude
+            domain="sharedpref"
+            path="reader_prefs.xml" />
+    </device-transfer>
+</data-extraction-rules>

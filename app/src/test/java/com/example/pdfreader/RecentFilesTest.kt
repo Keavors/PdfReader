@@ -75,4 +75,29 @@ class RecentFilesTest {
             withFileOnTop(start, file("a", "Новое имя")),
         )
     }
+
+    @Test
+    fun `запись с JSON-null не превращается в файл с именем null`() {
+        assertTrue(parseRecentFiles("""[{"uri":null,"name":null}]""").isEmpty())
+        assertTrue(parseRecentFiles("""[{"uri":"a"}]""").isEmpty())
+        assertTrue(parseRecentFiles("""[{"uri":"","name":"A"}]""").isEmpty())
+    }
+
+    @Test
+    fun `страница чтения переживает запись и чтение`() {
+        val files = listOf(RecentFile("content://x/1", "Книга.pdf", page = 42))
+        assertEquals(files, parseRecentFiles(encodeRecentFiles(files)))
+    }
+
+    @Test
+    fun `у старой записи без страницы чтение начинается с начала`() {
+        val parsed = parseRecentFiles("""[{"uri":"a","name":"A"}]""").single()
+        assertEquals(0, parsed.page)
+    }
+
+    @Test
+    fun `отрицательная страница не просачивается в список`() {
+        val parsed = parseRecentFiles("""[{"uri":"a","name":"A","page":-7}]""").single()
+        assertEquals(0, parsed.page)
+    }
 }

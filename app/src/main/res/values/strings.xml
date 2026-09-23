@@ -2,7 +2,6 @@
     <string name="app_name">PDF Reader</string>
 
     <!-- Верхняя панель -->
-    <string name="icon_back">←</string>
     <string name="cd_back">Закрыть документ</string>
     <string name="cd_share">Поделиться</string>
     <string name="cd_open">Открыть файл</string>
@@ -10,7 +9,7 @@
 
     <!-- Список недавних файлов -->
     <string name="recent_title">Недавние файлы</string>
-    <string name="recent_empty">Пока пусто — открой PDF кнопкой 📂 сверху</string>
+    <string name="recent_empty">Пока пусто — открой PDF кнопкой «папка» сверху</string>
 
     <!-- Диалог режима просмотра -->
     <string name="settings_title">Режим просмотра</string>
@@ -23,7 +22,14 @@
     <string name="action_apply">Применить</string>
     <string name="action_cancel">Отмена</string>
 
+    <!-- Документ под паролем -->
+    <string name="password_title">Документ защищён паролем</string>
+    <string name="password_hint">Пароль</string>
+    <string name="password_wrong">Пароль не подошёл</string>
+    <string name="action_open">Открыть</string>
+
     <string name="default_document_name">Документ.pdf</string>
     <string name="error_open_failed">Не удалось открыть файл</string>
+    <string name="error_file_gone">Файл больше недоступен — удалён или доступ к нему закрыт</string>
     <string name="error_share_failed">Нечем поделиться файлом</string>
 </resources>

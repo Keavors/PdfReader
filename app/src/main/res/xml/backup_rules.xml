@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    То же, что и в data_extraction_rules.xml, но для Android 11 и ниже.
+    Там резервное копирование и так выключено через allowBackup="false" -
+    правила лежат рядом, чтобы намерение было записано в одном месте.
+-->
+<full-backup-content>
+    <exclude
+        domain="sharedpref"
+        path="reader_prefs.xml" />
+</full-backup-content>

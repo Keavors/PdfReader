@@ -5,7 +5,7 @@
     android:layout_height="match_parent"
     android:orientation="vertical">
 
-    <!-- Верхняя панель: [←] [имя файла] [поделиться] [📂] [⚙️] -->
+    <!-- Верхняя панель: [назад] [имя файла] [поделиться] [открыть] [настройки] -->
     <LinearLayout
         android:id="@+id/topBar"
         android:layout_width="match_parent"
@@ -18,16 +18,14 @@
         android:paddingEnd="8dp"
         android:paddingBottom="4dp">
 
-        <TextView
+        <ImageButton
             android:id="@+id/btnBack"
             android:layout_width="48dp"
             android:layout_height="48dp"
             android:background="?attr/selectableItemBackgroundBorderless"
             android:contentDescription="@string/cd_back"
-            android:gravity="center"
-            android:text="@string/icon_back"
-            android:textColor="@color/text_primary"
-            android:textSize="22sp"
+            android:padding="12dp"
+            android:src="@drawable/ic_arrow_back"
             android:visibility="gone" />
 
         <TextView
@@ -44,7 +42,7 @@
             android:textColor="@color/text_primary"
             android:textSize="15sp" />
 
-        <ImageView
+        <ImageButton
             android:id="@+id/btnShare"
             android:layout_width="48dp"
             android:layout_height="48dp"
@@ -54,25 +52,23 @@
             android:src="@drawable/ic_share"
             android:visibility="gone" />
 
-        <TextView
+        <ImageButton
             android:id="@+id/btnOpen"
             android:layout_width="48dp"
             android:layout_height="48dp"
             android:background="?attr/selectableItemBackgroundBorderless"
             android:contentDescription="@string/cd_open"
-            android:gravity="center"
-            android:text="📂"
-            android:textSize="20sp" />
+            android:padding="12dp"
+            android:src="@drawable/ic_folder_open" />
 
-        <TextView
+        <ImageButton
             android:id="@+id/btnSettings"
             android:layout_width="48dp"
             android:layout_height="48dp"
             android:background="?attr/selectableItemBackgroundBorderless"
             android:contentDescription="@string/cd_settings"
-            android:gravity="center"
-            android:text="⚙️"
-            android:textSize="20sp" />
+            android:padding="12dp"
+            android:src="@drawable/ic_settings" />
     </LinearLayout>
 
     <!-- Контент под панелью: либо документ, либо список недавних -->

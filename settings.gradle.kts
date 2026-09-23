@@ -19,7 +19,12 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
-        maven { url = uri("https://jitpack.io") }
+        maven {
+            url = uri("https://jitpack.io")
+            // Только ради просмотрщика PDF: без фильтра с jitpack мог бы
+            // приехать любой модуль, в том числе подменённый.
+            content { includeGroup("com.github.mhiew") }
+        }
     }
 }
 
