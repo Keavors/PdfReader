@@ -23,7 +23,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="2dp"
-        android:ellipsize="middle"
+        android:ellipsize="end"
         android:maxLines="1"
         android:textColor="@color/text_hint"
         android:textSize="11sp" />

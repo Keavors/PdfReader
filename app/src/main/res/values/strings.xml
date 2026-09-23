@@ -17,6 +17,8 @@
     <string name="recent_clear">Очистить</string>
     <string name="recent_empty">Пока пусто — открой PDF кнопкой «папка» сверху</string>
     <string name="recent_unavailable">файл недоступен</string>
+    <string name="opened_today">сегодня, %1$s</string>
+    <string name="opened_yesterday">вчера, %1$s</string>
     <string name="recent_remove_title">Убрать из списка?</string>
     <string name="action_remove">Убрать</string>
     <string name="recent_clear_title">Очистить список недавних?</string>

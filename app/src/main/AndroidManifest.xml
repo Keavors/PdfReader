@@ -14,12 +14,18 @@
         android:theme="@style/Theme.PdfReader">
 
         <!-- configChanges: поворот экрана не пересоздаёт активити, поэтому
-             документ не перечитывается заново и не теряет масштаб с прокруткой. -->
+             документ не перечитывается заново и не теряет масштаб с прокруткой.
+
+             launchMode=singleTask: открытый из чужого приложения документ
+             попадает в СВОЮ задачу, а не в задачу того, кто его прислал. Иначе
+             читалка, вызванная из мессенджера, выглядит его частью: отдельной
+             карточки в недавних приложениях нет, а "назад" из документа
+             возвращает прямо в переписку. -->
         <activity
             android:name=".MainActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:exported="true"
-            android:launchMode="singleTop">
+            android:launchMode="singleTask">
 
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

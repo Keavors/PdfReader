@@ -3,6 +3,9 @@ package com.example.pdfreader
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.LocalDateTime
+import java.time.ZoneId
+import java.time.ZoneOffset
 
 class RecentFilesTest {
 
@@ -84,20 +87,94 @@ class RecentFilesTest {
     }
 
     @Test
-    fun `страница чтения переживает запись и чтение`() {
-        val files = listOf(RecentFile("content://x/1", "Книга.pdf", page = 42))
+    fun `страница, размер и время открытия переживают запись и чтение`() {
+        val files = listOf(
+            RecentFile("content://x/1", "Книга.pdf", page = 42, size = 1024, openedAt = 1700000),
+        )
         assertEquals(files, parseRecentFiles(encodeRecentFiles(files)))
     }
 
     @Test
-    fun `у старой записи без страницы чтение начинается с начала`() {
+    fun `у старой записи без новых полей разумные значения по умолчанию`() {
         val parsed = parseRecentFiles("""[{"uri":"a","name":"A"}]""").single()
         assertEquals(0, parsed.page)
+        assertEquals(0L, parsed.size)
+        assertEquals(0L, parsed.openedAt)
     }
 
     @Test
-    fun `отрицательная страница не просачивается в список`() {
-        val parsed = parseRecentFiles("""[{"uri":"a","name":"A","page":-7}]""").single()
+    fun `отрицательные значения не просачиваются в список`() {
+        val json = """[{"uri":"a","name":"A","page":-7,"size":-1,"openedAt":-5}]"""
+        val parsed = parseRecentFiles(json).single()
         assertEquals(0, parsed.page)
+        assertEquals(0L, parsed.size)
+        assertEquals(0L, parsed.openedAt)
     }
+
+    @Test
+    fun `тот же файл под новой ссылкой не создаёт вторую запись`() {
+        val old = RecentFile("content://whatsapp/1", "Договор.pdf", page = 5, size = 90_000)
+        val new = RecentFile("content://whatsapp/2", "Договор.pdf", page = 0, size = 90_000)
+
+        val result = withFileOnTop(listOf(old), new)
+
+        assertEquals(listOf(new), result)
+    }
+
+    @Test
+    fun `одинаковые имена с разным размером остаются разными файлами`() {
+        val first = RecentFile("content://x/1", "Отчёт.pdf", size = 100)
+        val second = RecentFile("content://x/2", "Отчёт.pdf", size = 200)
+
+        assertEquals(listOf(second, first), withFileOnTop(listOf(first), second))
+    }
+
+    @Test
+    fun `без известного размера файлы различаются только по ссылке`() {
+        val first = RecentFile("content://x/1", "Отчёт.pdf", size = 0)
+        val second = RecentFile("content://x/2", "Отчёт.pdf", size = 0)
+
+        assertEquals(listOf(second, first), withFileOnTop(listOf(first), second))
+    }
+
+    @Test
+    fun `время открытия раскладывается на сегодня, вчера и раньше`() {
+        val zone = ZoneId.of("Europe/Moscow")
+        val now = moment(2026, 9, 23, 10, 0, zone)
+
+        assertEquals(OpenedAtBucket.UNKNOWN, openedAtBucket(0, now, zone))
+        assertEquals(
+            OpenedAtBucket.TODAY,
+            openedAtBucket(moment(2026, 9, 23, 0, 1, zone), now, zone),
+        )
+        assertEquals(
+            OpenedAtBucket.YESTERDAY,
+            openedAtBucket(moment(2026, 9, 22, 23, 59, zone), now, zone),
+        )
+        assertEquals(
+            OpenedAtBucket.EARLIER,
+            openedAtBucket(moment(2026, 9, 21, 23, 59, zone), now, zone),
+        )
+    }
+
+    @Test
+    fun `сбитые вперёд часы не дают открытия из будущего`() {
+        val zone = ZoneOffset.UTC
+        val now = moment(2026, 9, 23, 10, 0, zone)
+        val tomorrow = moment(2026, 9, 24, 10, 0, zone)
+
+        assertEquals(OpenedAtBucket.TODAY, openedAtBucket(tomorrow, now, zone))
+    }
+
+    private fun moment(
+        year: Int,
+        month: Int,
+        day: Int,
+        hour: Int,
+        minute: Int,
+        zone: ZoneId,
+    ): Long = LocalDateTime.of(year, month, day, hour, minute)
+        .atZone(zone)
+        .toInstant()
+        .toEpochMilli()
 }

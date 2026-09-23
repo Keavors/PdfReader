@@ -11,14 +11,18 @@ import androidx.recyclerview.widget.RecyclerView
 /**
  * Строка списка недавних в готовом к показу виде.
  *
- * Папку разбираем один раз при сборке списка, а не на каждой перерисовке строки.
+ * Папку и дату разбираем один раз при сборке списка, а не на каждой
+ * перерисовке строки.
  *
+ * @param openedAt когда открывали в прошлый раз, готовой строкой; пусто,
+ *   если время неизвестно — например, запись осталась от старой версии
  * @param available файл ещё можно открыть; недоступные показываем приглушённо,
  *   чтобы было видно, почему по ним ничего не происходит.
  */
 data class RecentFileItem(
     val file: RecentFile,
     val folder: String,
+    val openedAt: String,
     val available: Boolean,
 )
 
@@ -56,17 +60,22 @@ class RecentFilesAdapter(
         }
     }
 
+    /**
+     * Подпись под именем: что важнее, то левее — так при нехватке места
+     * обрезается менее нужное.
+     */
     private fun subtitleFor(holder: ViewHolder, item: RecentFileItem): String {
         val unavailable = holder.itemView.context.getString(R.string.recent_unavailable)
-        return when {
-            !item.available && item.folder.isEmpty() -> unavailable
-            !item.available -> "${item.folder}  •  $unavailable"
-            else -> item.folder
-        }
+        return listOfNotNull(
+            unavailable.takeIf { !item.available },
+            item.openedAt.takeIf { it.isNotEmpty() },
+            item.folder.takeIf { it.isNotEmpty() },
+        ).joinToString(SUBTITLE_SEPARATOR)
     }
 
     private companion object {
         const val DIMMED_ALPHA = 0.45f
+        const val SUBTITLE_SEPARATOR = "  •  "
 
         val DIFF = object : DiffUtil.ItemCallback<RecentFileItem>() {
             override fun areItemsTheSame(old: RecentFileItem, new: RecentFileItem) =

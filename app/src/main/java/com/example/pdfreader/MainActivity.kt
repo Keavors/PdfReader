@@ -8,6 +8,8 @@ import android.content.pm.ActivityInfo
 import android.net.Uri
 import android.os.Bundle
 import android.provider.OpenableColumns
+import android.text.format.DateFormat
+import android.text.format.DateUtils
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
@@ -33,7 +35,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.FileNotFoundException
-import com.github.barteksc.pdfviewer.exception.FileNotFoundException as PdfFileNotFoundException
+import java.time.ZoneId
+import java.util.Date
 
 /** Единственный тип файлов, который открывает приложение. */
 private const val PDF_MIME_TYPE = "application/pdf"
@@ -48,6 +51,9 @@ private const val STATE_PASSWORD = "password"
 
 private const val REQUEST_REMOVE_RECENT = "remove_recent"
 private const val REQUEST_CLEAR_RECENT = "clear_recent"
+
+/** На сколько причин вглубь разбираем исключение, чтобы не уйти в петлю. */
+private const val MAX_CAUSE_DEPTH = 8
 
 /**
  * Единственный экран приложения: список недавних файлов, пока документ не выбран,
@@ -70,6 +76,9 @@ class MainActivity : AppCompatActivity() {
 
     private var currentUri: Uri? = null
     private var currentName = ""
+
+    /** Размер открытого файла в байтах; 0, пока провайдер не ответил. */
+    private var currentSize = 0L
     private var currentPassword: String? = null
     private var currentPage = 0
     private var pageCount = 0
@@ -249,6 +258,7 @@ class MainActivity : AppCompatActivity() {
         currentUri = uri
         currentPage = page
         currentPassword = password
+        currentSize = 0
         pageCount = 0
         documentLoaded = false
         pageErrorReported = false
@@ -256,7 +266,7 @@ class MainActivity : AppCompatActivity() {
         val settings = ReaderSettings.load(this)
         showReaderChrome(settings)
         showName(fallbackName(uri))
-        resolveNameAsync(uri)
+        resolveMetadataAsync(uri)
 
         val fitPolicy = when {
             settings.singlePage -> FitPolicy.BOTH   // страница целиком помещается на экран
@@ -341,8 +351,20 @@ class MainActivity : AppCompatActivity() {
         pageCount = pages
         updatePageIndicator()
         binding.btnOutline.isVisible = binding.pdfView.tableOfContents.isNotEmpty()
+        rememberOpened()
+    }
+
+    /** Записывает открытый документ в недавние — со всем, что о нём известно. */
+    private fun rememberOpened() {
         val uri = currentUri ?: return
-        if (hasDurableAccess(uri)) recentFiles.add(uri, currentName, currentPage)
+        if (!documentLoaded || !hasDurableAccess(uri)) return
+        recentFiles.add(
+            uri = uri,
+            name = currentName,
+            page = currentPage,
+            size = currentSize,
+            openedAt = System.currentTimeMillis(),
+        )
     }
 
     private fun updatePageIndicator() {
@@ -389,17 +411,17 @@ class MainActivity : AppCompatActivity() {
     private fun errorMessage(gone: Boolean): Int =
         if (gone) R.string.error_file_gone else R.string.error_open_failed
 
-    /** Файла нет или доступ к нему отозван — повторять попытку бессмысленно. */
+    /**
+     * Файла нет или доступ к нему отозван — повторять попытку бессмысленно.
+     *
+     * Смотрим и на причины: открытие идёт через ContentResolver, и настоящая
+     * ошибка нередко завёрнута в чужое исключение.
+     */
     private fun isGone(error: Throwable): Boolean {
         var cause: Throwable? = error
         var depth = 0
-        while (cause != null && depth++ < 8) {
-            if (cause is SecurityException ||
-                cause is FileNotFoundException ||
-                cause is PdfFileNotFoundException
-            ) {
-                return true
-            }
+        while (cause != null && depth++ < MAX_CAUSE_DEPTH) {
+            if (cause is SecurityException || cause is FileNotFoundException) return true
             cause = cause.cause
         }
         return false
@@ -496,6 +518,7 @@ class MainActivity : AppCompatActivity() {
         if (intentUri(intent) != null) intent = Intent(Intent.ACTION_MAIN)
         currentUri = null
         currentName = ""
+        currentSize = 0
         currentPassword = null
         currentPage = 0
         pageCount = 0
@@ -512,40 +535,49 @@ class MainActivity : AppCompatActivity() {
         binding.titleView.text = name
     }
 
+    /** Имя и размер файла, как их видит провайдер. */
+    private class DocumentMeta(val name: String?, val size: Long)
+
     /**
-     * Уточняет имя файла у провайдера в фоне.
+     * Уточняет имя и размер файла у провайдера в фоне.
      *
      * Запрос к чужому провайдеру (особенно к облачному) может задуматься на сотни
      * миллисекунд, поэтому документ начинает грузиться сразу, а в заголовке до
-     * ответа стоит имя, вытащенное из самой ссылки.
+     * ответа стоит имя, вытащенное из самой ссылки. Размер нужен списку недавних:
+     * по нему вместе с именем один и тот же файл узнаётся под разными ссылками.
      */
-    private fun resolveNameAsync(uri: Uri) {
+    private fun resolveMetadataAsync(uri: Uri) {
         nameJob?.cancel()
         nameJob = lifecycleScope.launch {
-            val name = withContext(Dispatchers.IO) { queryDisplayName(uri) } ?: return@launch
+            val meta = withContext(Dispatchers.IO) { queryMetadata(uri) }
             if (currentUri != uri) return@launch
-            showName(name)
-            if (documentLoaded && hasDurableAccess(uri)) {
-                recentFiles.add(uri, name, currentPage)
-            }
+            meta.name?.let { showName(it) }
+            currentSize = meta.size
+            rememberOpened()
         }
     }
 
-    private fun queryDisplayName(uri: Uri): String? =
-        displayName(uri, arrayOf(OpenableColumns.DISPLAY_NAME))
-            ?: displayName(uri, null) // провайдер может не понять проекцию
+    private fun queryMetadata(uri: Uri): DocumentMeta =
+        metadata(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE))
+            ?: metadata(uri, null) // провайдер может не понять проекцию
+            ?: DocumentMeta(name = null, size = 0)
 
-    private fun displayName(uri: Uri, projection: Array<String>?): String? = try {
+    private fun metadata(uri: Uri, projection: Array<String>?): DocumentMeta? = try {
         contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
-            val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-            if (index >= 0 && cursor.moveToFirst()) {
-                cursor.getString(index)?.takeIf { it.isNotBlank() }
-            } else {
-                null
-            }
+            if (!cursor.moveToFirst()) return@use null
+            val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+            DocumentMeta(
+                name = nameIndex.takeIf { it >= 0 }
+                    ?.let { cursor.getString(it) }
+                    ?.takeIf { it.isNotBlank() },
+                size = sizeIndex.takeIf { it >= 0 && !cursor.isNull(it) }
+                    ?.let { cursor.getLong(it).coerceAtLeast(0) }
+                    ?: 0,
+            )
         }
     } catch (_: Exception) {
-        // Имя не отдали - обойдёмся хвостом ссылки.
+        // Ничего не отдали - обойдёмся хвостом ссылки.
         null
     }
 
@@ -637,6 +669,29 @@ class MainActivity : AppCompatActivity() {
         showRecentFiles()
     }
 
+    /**
+     * Когда файл открывали в прошлый раз.
+     *
+     * Ближние дни называем словами: «сегодня, 14:32» читается быстрее даты.
+     * Время и дата форматируются по настройкам системы — включая выбор между
+     * 12- и 24-часовым форматом.
+     */
+    private fun formatOpenedAt(openedAt: Long, now: Long, zone: ZoneId): String =
+        when (openedAtBucket(openedAt, now, zone)) {
+            OpenedAtBucket.UNKNOWN -> ""
+            OpenedAtBucket.TODAY -> getString(R.string.opened_today, timeText(openedAt))
+            OpenedAtBucket.YESTERDAY -> getString(R.string.opened_yesterday, timeText(openedAt))
+            OpenedAtBucket.EARLIER -> DateUtils.formatDateTime(
+                this,
+                openedAt,
+                DateUtils.FORMAT_SHOW_DATE or DateUtils.FORMAT_ABBREV_MONTH or
+                    DateUtils.FORMAT_SHOW_TIME,
+            )
+        }
+
+    private fun timeText(millis: Long): String =
+        DateFormat.getTimeFormat(this).format(Date(millis))
+
     /** Экран без открытого документа: заголовок и список недавних файлов. */
     private fun showRecentFiles() {
         binding.emptyHint.isVisible = true
@@ -652,10 +707,13 @@ class MainActivity : AppCompatActivity() {
         applyReadingPreferences(ReaderSettings.load(this), reading = false)
 
         val durable = durableUris()
+        val now = System.currentTimeMillis()
+        val zone = ZoneId.systemDefault()
         val items = recentFiles.load().map { file ->
             RecentFileItem(
                 file = file,
                 folder = readablePath(file.uri),
+                openedAt = formatOpenedAt(file.openedAt, now, zone),
                 available = !file.uri.startsWith("${ContentResolver.SCHEME_CONTENT}:") ||
                     file.uri in durable,
             )

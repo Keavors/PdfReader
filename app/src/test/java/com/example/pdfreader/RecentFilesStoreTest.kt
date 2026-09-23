@@ -36,15 +36,18 @@ class RecentFilesStoreTest {
 
     @Test
     fun `файл сохраняется и читается обратно`() {
-        store.add(uri("a"), "Книга.pdf", page = 7)
-        assertEquals(listOf(RecentFile("content://test/a", "Книга.pdf", 7)), store.load())
+        store.add(uri("a"), "Книга.pdf", page = 7, size = 100, openedAt = 1_700_000)
+        assertEquals(
+            listOf(RecentFile("content://test/a", "Книга.pdf", 7, 100, 1_700_000)),
+            store.load(),
+        )
     }
 
     @Test
     fun `повторное открытие не плодит записи`() {
-        store.add(uri("a"), "Книга.pdf", page = 0)
-        store.add(uri("b"), "Отчёт.pdf", page = 0)
-        store.add(uri("a"), "Книга.pdf", page = 3)
+        store.add(uri("a"), "Книга.pdf", page = 0, size = 0, openedAt = 1)
+        store.add(uri("b"), "Отчёт.pdf", page = 0, size = 0, openedAt = 2)
+        store.add(uri("a"), "Книга.pdf", page = 3, size = 0, openedAt = 3)
 
         val loaded = store.load()
         assertEquals(2, loaded.size)
@@ -54,7 +57,7 @@ class RecentFilesStoreTest {
 
     @Test
     fun `страница чтения запоминается и достаётся по ссылке`() {
-        store.add(uri("a"), "Книга.pdf", page = 0)
+        store.add(uri("a"), "Книга.pdf", page = 0, size = 0, openedAt = 1)
         store.updatePage(uri("a"), 42)
         assertEquals(42, store.pageOf(uri("a")))
     }
@@ -68,29 +71,31 @@ class RecentFilesStoreTest {
 
     @Test
     fun `удаление убирает только свой файл`() {
-        store.add(uri("a"), "A", page = 0)
-        store.add(uri("b"), "B", page = 0)
+        store.add(uri("a"), "A", page = 0, size = 0, openedAt = 1)
+        store.add(uri("b"), "B", page = 0, size = 0, openedAt = 2)
         store.remove(uri("a"))
         assertEquals(listOf("content://test/b"), store.load().map { it.uri })
     }
 
     @Test
     fun `очистка опустошает список`() {
-        store.add(uri("a"), "A", page = 0)
-        store.add(uri("b"), "B", page = 0)
+        store.add(uri("a"), "A", page = 0, size = 0, openedAt = 1)
+        store.add(uri("b"), "B", page = 0, size = 0, openedAt = 2)
         store.clear()
         assertTrue(store.load().isEmpty())
     }
 
     @Test
     fun `список не растёт дальше лимита`() {
-        repeat(RECENT_FILES_LIMIT + 5) { store.add(uri("file$it"), "F$it", page = 0) }
+        repeat(RECENT_FILES_LIMIT + 5) {
+            store.add(uri("file$it"), "F$it", page = 0, size = 0, openedAt = it.toLong())
+        }
         assertEquals(RECENT_FILES_LIMIT, store.load().size)
     }
 
     @Test
     fun `другое хранилище видит те же записи`() {
-        store.add(uri("a"), "Книга.pdf", page = 5)
+        store.add(uri("a"), "Книга.pdf", page = 5, size = 7, openedAt = 1)
         assertEquals(store.load(), RecentFilesStore(context).load())
     }
 }

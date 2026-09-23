@@ -44,7 +44,13 @@ class ReaderSettingsTest {
     @Test
     fun `настройки живут в том же файле, что и список недавних`() {
         ReaderSettings(nightMode = true).save(context)
-        RecentFilesStore(context).add("content://test/a".toUri(), "A", page = 1)
+        RecentFilesStore(context).add(
+            "content://test/a".toUri(),
+            name = "A",
+            page = 1,
+            size = 0,
+            openedAt = 1,
+        )
 
         assertEquals(true, ReaderSettings.load(context).nightMode)
         assertEquals(1, RecentFilesStore(context).load().single().page)
