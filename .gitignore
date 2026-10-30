@@ -1,17 +1,8 @@
 *.iml
 .gradle
 /local.properties
-/.idea/caches
-/.idea/libraries
-# Машинно-специфичное: цель развёртывания, конфигурации запуска, режимы IDE
-/.idea/deploymentTargetSelector.xml
-/.idea/runConfigurations.xml
-/.idea/planningMode.xml
-/.idea/AndroidProjectSystem.xml
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
+# Настройки Android Studio целиком: студия создаёт их заново сама
+/.idea/
 .DS_Store
 /build
 /captures
