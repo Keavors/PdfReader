@@ -13,24 +13,40 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.PdfReader">
 
-        <!-- configChanges: поворот экрана не пересоздаёт активити, поэтому
-             документ не перечитывается заново и не теряет масштаб с прокруткой.
+        <!-- Приложение, запущенное с иконки: список файлов, из него документ,
+             "назад" из документа - снова к списку.
 
-             launchMode=singleTask: открытый из чужого приложения документ
-             попадает в СВОЮ задачу, а не в задачу того, кто его прислал. Иначе
-             читалка, вызванная из мессенджера, выглядит его частью: отдельной
-             карточки в недавних приложениях нет, а "назад" из документа
-             возвращает прямо в переписку. -->
+             configChanges: поворот экрана не пересоздаёт активити, поэтому
+             документ не перечитывается заново и не теряет масштаб с прокруткой. -->
         <activity
             android:name=".MainActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
-            android:exported="true"
-            android:launchMode="singleTask">
+            android:exported="true">
 
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+        </activity>
+
+        <!-- Документ из другого приложения: мессенджера, почты, проводника.
+
+             Открывается поверх того, кто его прислал, в его же задаче: своей
+             карточки в недавних приложениях у читалки не появляется, а "назад"
+             возвращает прямо в переписку.
+
+             Если отправитель всё же требует новую задачу, taskAffinity=""
+             даёт документу отдельную, а не кладёт его поверх списка файлов:
+             "назад" и тогда ведёт к отправителю. autoRemoveFromRecents убирает
+             такую задачу из недавних, как только документ закрыт, а singleTop
+             не даёт ей копить документы стопкой. -->
+        <activity
+            android:name=".ViewerActivity"
+            android:autoRemoveFromRecents="true"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:taskAffinity="">
 
             <!-- Чтобы приложение предлагалось при открытии PDF из проводника -->
             <intent-filter>

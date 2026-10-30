@@ -18,6 +18,12 @@ private const val DIRECTORY = "imported"
 
 private const val SCHEME_FILE = ContentResolver.SCHEME_FILE
 
+/**
+ * Копии моложе этого считаются занятыми: их, возможно, прямо сейчас переносит
+ * другое окно читалки, и в список недавних они попадут чуть позже.
+ */
+private const val ORPHAN_MIN_AGE_MS = 60L * 60 * 1000
+
 private const val MAX_NAME_LENGTH = 80
 private const val FORBIDDEN_IN_NAME = "/\\:*?\"<>|"
 
@@ -79,14 +85,23 @@ class ImportedDocuments(context: Context) {
      * Выносит копии, на которые уже никто не ссылается.
      *
      * Такое остаётся, если приложение убили посреди переноса или настройки
-     * почистили мимо нас. Блокирующий вызов.
+     * почистили мимо нас. Свежие копии не трогаем: документ, присланный
+     * мессенджером, переносится в другом окне, и в список недавних он попадает
+     * только после переноса. Блокирующий вызов.
+     *
+     * @param now текущее время; параметр нужен тестам
      */
-    fun deleteOrphans(keep: Collection<String>) {
+    fun deleteOrphans(keep: Collection<String>, now: Long = System.currentTimeMillis()) {
         val used = keep.mapNotNull { folderOf(it)?.absolutePath }.toSet()
         root.listFiles()?.forEach { folder ->
-            if (folder.absolutePath !in used) folder.deleteRecursively()
+            if (folder.absolutePath in used) return@forEach
+            if (now - lastTouched(folder) < ORPHAN_MIN_AGE_MS) return@forEach
+            folder.deleteRecursively()
         }
     }
+
+    /** Когда в папку копии писали последний раз: пока файл переносится, это "только что". */
+    private fun lastTouched(folder: File): Long = folder.walk().maxOf { it.lastModified() }
 
     /**
      * Файл нашей копии по ссылке, или null, если ссылка не наша.

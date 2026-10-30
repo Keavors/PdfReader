@@ -114,10 +114,24 @@ class ImportedDocumentsTest {
             dropContent.size.toLong(),
         )!!
 
-        imported.deleteOrphans(listOf(keep.toString()))
+        imported.deleteOrphans(listOf(keep.toString()), now = System.currentTimeMillis() + DAY)
 
         assertTrue(File(keep.path!!).exists())
         assertFalse(File(drop.path!!).exists())
+    }
+
+    @Test
+    fun `свежую копию не выносят - её, может быть, ещё переносит другое окно`() {
+        val content = "данные".toByteArray()
+        val fresh = imported.copy(
+            provide("content://wa/1", content),
+            "Файл.pdf",
+            content.size.toLong(),
+        )!!
+
+        imported.deleteOrphans(emptyList())
+
+        assertTrue(File(fresh.path!!).exists())
     }
 
     @Test
@@ -135,4 +149,8 @@ class ImportedDocumentsTest {
 
     private fun assertArrayEquals(expected: ByteArray, actual: ByteArray) =
         assertEquals(expected.toList(), actual.toList())
+
+    private companion object {
+        const val DAY = 24L * 60 * 60 * 1000
+    }
 }

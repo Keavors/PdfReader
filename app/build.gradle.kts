@@ -10,8 +10,8 @@ android {
         applicationId = "com.example.pdfreader"
         minSdk = 26
         targetSdk = 37
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -37,6 +37,10 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // Отладочный ключ нарочно: приложение не публикуется в магазине,
+            // а так релизная сборка ставится поверх сборок с этого компьютера
+            // без ключей и паролей.
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
     compileOptions {

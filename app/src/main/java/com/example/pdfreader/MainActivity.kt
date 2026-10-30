@@ -3,6 +3,7 @@ package com.example.pdfreader
 import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ContentResolver
+import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.net.Uri
@@ -11,12 +12,14 @@ import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import android.text.format.DateFormat
 import android.text.format.DateUtils
+import android.view.View
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.StringRes
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.widget.PopupMenu
 import androidx.core.content.FileProvider
 import androidx.core.content.IntentCompat
 import androidx.core.graphics.Insets
@@ -51,6 +54,7 @@ private const val STATE_URI = "uri"
 private const val STATE_PAGE = "page"
 private const val STATE_HIDDEN = "hidden"
 private const val STATE_PASSWORD = "password"
+private const val STATE_FROM_OUTSIDE = "from_outside"
 
 private const val REQUEST_REMOVE_RECENT = "remove_recent"
 private const val REQUEST_CLEAR_RECENT = "clear_recent"
@@ -60,13 +64,17 @@ private const val REQUEST_DELETE_FILE = "delete_file"
 private const val MAX_CAUSE_DEPTH = 8
 
 /**
- * Единственный экран приложения: список недавних файлов, пока документ не выбран,
+ * Экран приложения: список недавних файлов, пока документ не выбран,
  * и просмотрщик, когда выбран.
+ *
+ * Документ, присланный другим приложением, показывает [ViewerActivity] — тот
+ * же экран, но в задаче отправителя: "назад" из него возвращает к отправителю,
+ * а не к списку.
  *
  * Одиночный тап по документу убирает с экрана всё, кроме самого файла
  * (панель, ползунок, системные бары), повторный — возвращает.
  */
-class MainActivity : AppCompatActivity() {
+open class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
 
@@ -77,8 +85,15 @@ class MainActivity : AppCompatActivity() {
     )
 
     private lateinit var importedDocs: ImportedDocuments
+    private lateinit var exporter: DocumentExporter
 
     private var scrollHandle: LockableScrollHandle? = null
+
+    /**
+     * Документ прислало другое приложение. Человек пришёл посмотреть один
+     * файл, поэтому "назад" возвращает к отправителю, а не к списку недавних.
+     */
+    private var openedFromOutside = false
 
     private var currentUri: Uri? = null
     private var currentName = ""
@@ -128,7 +143,26 @@ class MainActivity : AppCompatActivity() {
             openDocument(uri)
         }
 
-    /** Системная кнопка "назад" сначала закрывает документ и только потом выходит. */
+    /**
+     * Системное окно «Сохранить»: в нём выбирают любую папку на телефоне,
+     * там же создают новую и меняют имя файла. Разрешений на память не нужно.
+     */
+    private val saveAsLauncher = registerForActivityResult(
+        object : ActivityResultContracts.CreateDocument(PDF_MIME_TYPE) {
+            // Без этой категории в окне могут оказаться места, куда файл
+            // сохранить нельзя, а только сослаться на него.
+            override fun createIntent(context: Context, input: String): Intent =
+                super.createIntent(context, input).addCategory(Intent.CATEGORY_OPENABLE)
+        }
+    ) { target ->
+        if (target != null) saveCopyTo(target)
+    }
+
+    /**
+     * Системная кнопка "назад" из документа, открытого здесь же, сначала
+     * возвращает к списку и только потом выходит. У документа из другого
+     * приложения она выключена: система сама вернёт к отправителю.
+     */
     private val backCallback = object : OnBackPressedCallback(false) {
         override fun handleOnBackPressed() = closeDocument()
     }
@@ -141,10 +175,12 @@ class MainActivity : AppCompatActivity() {
 
         recentFiles = RecentFilesStore(this)
         importedDocs = ImportedDocuments(this)
+        exporter = DocumentExporter(this)
 
         binding.btnOpen.setOnClickListener { pickFile() }
         binding.btnSettings.setOnClickListener { showSettingsDialog() }
-        binding.btnBack.setOnClickListener { closeDocument() }
+        binding.btnMore.setOnClickListener { showDocumentMenu(it) }
+        binding.btnBack.setOnClickListener { leaveDocument() }
         binding.btnShare.setOnClickListener { shareCurrentFile() }
         binding.btnOutline.setOnClickListener { showOutline() }
         binding.pageIndicator.setOnClickListener { showJumpToPage() }
@@ -187,6 +223,7 @@ class MainActivity : AppCompatActivity() {
             currentPage = savedInstanceState.getInt(STATE_PAGE, 0)
             uiHidden = savedInstanceState.getBoolean(STATE_HIDDEN, false)
             currentPassword = savedInstanceState.getString(STATE_PASSWORD)
+            openedFromOutside = savedInstanceState.getBoolean(STATE_FROM_OUTSIDE, false)
             val restoredUri =
                 BundleCompat.getParcelable(savedInstanceState, STATE_URI, Uri::class.java)
             if (restoredUri != null) {
@@ -198,21 +235,34 @@ class MainActivity : AppCompatActivity() {
         }
 
         val uri = intentUri(intent)
-        if (uri != null) {
-            keepAccess(uri)
-            openDocument(uri)
-        } else {
-            showRecentFiles()
+        when {
+            uri != null -> openFromOutside(uri)
+            // Попросили открыть файл, но не сказали какой: показать нечего,
+            // и список недавних поверх чужого приложения тут ни к чему.
+            isDocumentIntent(intent) -> {
+                Toast.makeText(this, R.string.error_open_failed, Toast.LENGTH_LONG).show()
+                finish()
+            }
+            else -> showRecentFiles()
         }
     }
 
-    /** Открыли ещё один PDF, пока приложение уже запущено. */
+    /** Прислали ещё один PDF, пока этот экран открыт. */
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         val uri = intentUri(intent) ?: return
-        keepAccess(uri)
-        openDocument(uri)
+        openFromOutside(uri)
+    }
+
+    /**
+     * Вернулись к экрану, который был скрыт. Список недавних за это время мог
+     * поменяться: документ, присланный мессенджером, записывается в него
+     * из другого окна читалки.
+     */
+    override fun onRestart() {
+        super.onRestart()
+        if (currentUri == null) showRecentFiles()
     }
 
     override fun onPause() {
@@ -226,6 +276,7 @@ class MainActivity : AppCompatActivity() {
         outState.putInt(STATE_PAGE, currentPage)
         outState.putBoolean(STATE_HIDDEN, uiHidden)
         outState.putString(STATE_PASSWORD, currentPassword)
+        outState.putBoolean(STATE_FROM_OUTSIDE, openedFromOutside)
     }
 
     override fun onDestroy() {
@@ -245,6 +296,17 @@ class MainActivity : AppCompatActivity() {
         Intent.ACTION_SEND ->
             IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
         else -> null
+    }
+
+    /** Экран запустили ради документа, а не с иконки приложения. */
+    private fun isDocumentIntent(intent: Intent?): Boolean =
+        intent?.action == Intent.ACTION_VIEW || intent?.action == Intent.ACTION_SEND
+
+    /** Документ прислало другое приложение - после него вернёмся туда же. */
+    private fun openFromOutside(uri: Uri) {
+        keepAccess(uri)
+        openedFromOutside = true
+        openDocument(uri)
     }
 
     /**
@@ -346,8 +408,9 @@ class MainActivity : AppCompatActivity() {
         binding.pdfView.isVisible = true
         binding.btnBack.isVisible = true
         binding.btnShare.isVisible = true
+        binding.btnMore.isVisible = true
         binding.btnOpen.isVisible = false // с открытым документом панели и так тесно
-        backCallback.isEnabled = true
+        backCallback.isEnabled = !openedFromOutside
         applyReadingPreferences(settings, reading = true)
     }
 
@@ -478,7 +541,7 @@ class MainActivity : AppCompatActivity() {
         val gone = isGone(error)
         Toast.makeText(this, errorMessage(gone), Toast.LENGTH_LONG).show()
         currentUri?.let { if (gone) recentFiles.remove(it) }
-        closeDocument()
+        leaveDocument()
     }
 
     @StringRes
@@ -676,7 +739,7 @@ class MainActivity : AppCompatActivity() {
         onDialogResult(PasswordDialogFragment.RESULT_KEY) { result ->
             val password = result.getString(PasswordDialogFragment.EXTRA_PASSWORD)
             val uri = currentUri
-            if (password.isNullOrEmpty() || uri == null) closeDocument()
+            if (password.isNullOrEmpty() || uri == null) leaveDocument()
             else openPdf(uri, currentPage, password)
         }
         onDialogResult(OutlineDialogFragment.RESULT_KEY) { result ->
@@ -714,6 +777,14 @@ class MainActivity : AppCompatActivity() {
         supportFragmentManager.setFragmentResultListener(key, this) { _, result -> handle(result) }
     }
 
+    /**
+     * Кнопка "назад" на панели и всё остальное, что закрывает документ: к списку
+     * недавних или, если документ прислало другое приложение, обратно в него.
+     */
+    private fun leaveDocument() {
+        if (openedFromOutside) finish() else closeDocument()
+    }
+
     private fun closeDocument() {
         rememberPosition()
         // Интент со ссылкой на документ отработал: дальше он только мешает,
@@ -726,6 +797,7 @@ class MainActivity : AppCompatActivity() {
         currentPage = 0
         pageCount = 0
         documentLoaded = false
+        openedFromOutside = false
         nameJob?.cancel()
         scrollHandle = null
         backCallback.isEnabled = false
@@ -818,6 +890,59 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent.createChooser(send, getString(R.string.cd_share)))
         } catch (_: ActivityNotFoundException) {
             Toast.makeText(this, R.string.error_share_failed, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    /** Меню ⋮ у открытого документа. */
+    private fun showDocumentMenu(anchor: View) {
+        PopupMenu(this, anchor).apply {
+            inflate(R.menu.document)
+            setOnMenuItemClickListener { item ->
+                when (item.itemId) {
+                    R.id.action_save_as -> {
+                        saveAs()
+                        true
+                    }
+                    else -> false
+                }
+            }
+            show()
+        }
+    }
+
+    /** Сохранить копию документа: куда и под каким именем — выбирают в окне системы. */
+    private fun saveAs() {
+        if (currentUri == null) return
+        try {
+            saveAsLauncher.launch(suggestedFileName())
+        } catch (_: ActivityNotFoundException) {
+            Toast.makeText(this, R.string.error_no_save_app, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    /** Имя, которое окно сохранения предложит, — с расширением, чтобы файл узнавался как PDF. */
+    private fun suggestedFileName(): String {
+        val name = currentName.ifBlank { getString(R.string.default_document_name) }
+        return if (name.endsWith(".pdf", ignoreCase = true)) name else "$name.pdf"
+    }
+
+    /**
+     * Пишет копию открытого документа в выбранное место.
+     *
+     * Источник берём в момент ответа, а не запуска окна: пока его показывали,
+     * документ мог успеть переехать в своё хранилище, а экран — пересоздаться.
+     */
+    private fun saveCopyTo(target: Uri) {
+        val source = currentUri ?: return
+        lifecycleScope.launch {
+            val saved = withContext(Dispatchers.IO) { exporter.export(source, target) }
+            val folder = readablePath(target.toString())
+            val message = when {
+                !saved -> getString(R.string.error_save_failed)
+                folder.isNotEmpty() -> getString(R.string.save_done_in, folder)
+                else -> getString(R.string.save_done)
+            }
+            Toast.makeText(this@MainActivity, message, Toast.LENGTH_LONG).show()
         }
     }
 
@@ -934,6 +1059,7 @@ class MainActivity : AppCompatActivity() {
         binding.pdfView.isVisible = false
         binding.btnBack.isVisible = false
         binding.btnShare.isVisible = false
+        binding.btnMore.isVisible = false
         binding.btnOutline.isVisible = false
         binding.pageIndicator.isVisible = false
         binding.btnOpen.isVisible = true

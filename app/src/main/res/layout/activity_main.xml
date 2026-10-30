@@ -5,8 +5,10 @@
     android:layout_height="match_parent"
     android:orientation="vertical">
 
-    <!-- Верхняя панель: [назад] [имя файла] [стр.] [оглавление] [поделиться] [открыть] [настройки].
-         Часть кнопок показывается только с открытым документом, часть — только без него. -->
+    <!-- Верхняя панель: [назад] [имя файла] [стр.] [оглавление] [поделиться] [открыть] [настройки] [ещё].
+         Часть кнопок показывается только с открытым документом, часть — только без него.
+         Кнопки чуть уже стандартных 48dp: с открытым документом их на панели шесть,
+         и на узком телефоне имени файла иначе почти не остаётся места. -->
     <LinearLayout
         android:id="@+id/topBar"
         android:layout_width="match_parent"
@@ -21,11 +23,11 @@
 
         <ImageButton
             android:id="@+id/btnBack"
-            android:layout_width="48dp"
+            android:layout_width="44dp"
             android:layout_height="48dp"
             android:background="?attr/selectableItemBackgroundBorderless"
             android:contentDescription="@string/cd_back"
-            android:padding="12dp"
+            android:padding="10dp"
             android:src="@drawable/ic_arrow_back"
             android:visibility="gone" />
 
@@ -60,41 +62,53 @@
 
         <ImageButton
             android:id="@+id/btnOutline"
-            android:layout_width="48dp"
+            android:layout_width="44dp"
             android:layout_height="48dp"
             android:background="?attr/selectableItemBackgroundBorderless"
             android:contentDescription="@string/cd_outline"
-            android:padding="12dp"
+            android:padding="10dp"
             android:src="@drawable/ic_outline"
             android:visibility="gone" />
 
         <ImageButton
             android:id="@+id/btnShare"
-            android:layout_width="48dp"
+            android:layout_width="44dp"
             android:layout_height="48dp"
             android:background="?attr/selectableItemBackgroundBorderless"
             android:contentDescription="@string/cd_share"
-            android:padding="12dp"
+            android:padding="10dp"
             android:src="@drawable/ic_share"
             android:visibility="gone" />
 
         <ImageButton
             android:id="@+id/btnOpen"
-            android:layout_width="48dp"
+            android:layout_width="44dp"
             android:layout_height="48dp"
             android:background="?attr/selectableItemBackgroundBorderless"
             android:contentDescription="@string/cd_open"
-            android:padding="12dp"
+            android:padding="10dp"
             android:src="@drawable/ic_folder_open" />
 
         <ImageButton
             android:id="@+id/btnSettings"
-            android:layout_width="48dp"
+            android:layout_width="44dp"
             android:layout_height="48dp"
             android:background="?attr/selectableItemBackgroundBorderless"
             android:contentDescription="@string/cd_settings"
-            android:padding="12dp"
+            android:padding="10dp"
             android:src="@drawable/ic_settings" />
+
+        <!-- Меню документа. Значок узкий, поэтому и кнопка уже остальных -
+             как у стандартной кнопки меню в Android. -->
+        <ImageButton
+            android:id="@+id/btnMore"
+            android:layout_width="40dp"
+            android:layout_height="48dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/cd_more"
+            android:padding="8dp"
+            android:src="@drawable/ic_more_vert"
+            android:visibility="gone" />
     </LinearLayout>
 
     <!-- Контент под панелью: либо документ, либо список недавних -->

@@ -8,6 +8,12 @@
     <string name="cd_settings">Настройки просмотра</string>
     <string name="cd_outline">Оглавление</string>
     <string name="cd_jump_to_page">Перейти к странице</string>
+    <string name="cd_more">Ещё</string>
+
+    <!-- Меню ⋮ у открытого документа -->
+    <string name="menu_save_as">Сохранить как…</string>
+    <string name="save_done">Файл сохранён</string>
+    <string name="save_done_in">Сохранено в %1$s</string>
 
     <!-- Счётчик страниц на панели: 12/340 -->
     <string name="page_indicator">%1$d/%2$d</string>
@@ -65,5 +71,7 @@
     <string name="error_share_failed">Нечем поделиться файлом</string>
     <string name="error_delete_failed">Не удалось удалить файл — приложению не дали на это прав</string>
     <string name="error_no_folder_app">Нечем открыть папку на этом устройстве</string>
+    <string name="error_save_failed">Не удалось сохранить файл</string>
+    <string name="error_no_save_app">Нечем сохранить файл на этом устройстве</string>
     <string name="error_page_failed">Страница %1$d не отрисовалась</string>
 </resources>

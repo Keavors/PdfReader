@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Меню ⋮ у открытого документа -->
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Системное окно сохранения: любая папка на телефоне, там же можно
+         создать новую и поменять имя файла. -->
+    <item
+        android:id="@+id/action_save_as"
+        android:title="@string/menu_save_as" />
+</menu>
